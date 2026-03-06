@@ -5,13 +5,12 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  TextInput,
+  RefreshControl,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
   Modal,
   Pressable,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,8 +24,10 @@ export default function HomeStockScreen() {
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<HomeStockItem | null>(null);
   const [editQuantity, setEditQuantity] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const { homeStock, fetchHomeStock, deleteHomeStockItem, updateHomeStockItem, quickAddHomeStock, loading } = useAppStore();
 
@@ -40,26 +41,27 @@ export default function HomeStockScreen() {
     setRefreshing(false);
   };
 
-  const handleDelete = async (item: HomeStockItem) => {
-    Alert.alert(
-      'Delete Item',
-      `Are you sure you want to delete "${item.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteHomeStockItem(item.id);
-            } catch (error) {
-              console.error('Delete error:', error);
-              Alert.alert('Error', 'Failed to delete item');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeletePress = (item: HomeStockItem) => {
+    setSelectedItem(item);
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedItem) return;
+    
+    setIsDeleting(true);
+    try {
+      console.log('Confirming delete for:', selectedItem.id);
+      await deleteHomeStockItem(selectedItem.id);
+      console.log('Delete successful');
+      setDeleteModalVisible(false);
+      setSelectedItem(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      Alert.alert('Error', 'Failed to delete item');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleItemPress = (item: HomeStockItem) => {
@@ -156,7 +158,7 @@ export default function HomeStockScreen() {
             style={styles.deleteBtn}
             onPress={(e) => {
               e.stopPropagation();
-              handleDelete(item);
+              handleDeletePress(item);
             }}
           >
             <Ionicons name="trash-outline" size={20} color={colors.danger} />
@@ -267,6 +269,52 @@ export default function HomeStockScreen() {
                 onPress={handleSaveQuantity}
               >
                 <Text style={styles.modalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setDeleteModalVisible(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.deleteIconContainer}>
+              <Ionicons name="trash" size={40} color={colors.danger} />
+            </View>
+            <Text style={styles.modalTitle}>Delete Item?</Text>
+            <Text style={styles.deleteModalText}>
+              Are you sure you want to delete "{selectedItem?.name}"?
+            </Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setDeleteModalVisible(false);
+                  setSelectedItem(null);
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, styles.deleteBtn]}
+                onPress={confirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.modalSaveText}>Delete</Text>
+                )}
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -515,5 +563,19 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.white,
     fontWeight: '600',
+  },
+  // Delete modal styles
+  deleteIconContainer: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  deleteModalText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  deleteBtn: {
+    backgroundColor: colors.danger,
   },
 });

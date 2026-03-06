@@ -52,29 +52,36 @@ export default function RecipeDetailScreen() {
     }
   };
 
+  const handleAddMissingToList = async () => {
+    const missing = availability.filter(i => i.status === 'missing' || i.status === 'insufficient');
+    if (missing.length === 0) {
+      Alert.alert('No Missing Items', 'All ingredients are available!');
+      return;
+    }
+
+    setCooking(true);
+    try {
+      const missingIngredients = missing.map(m => ({
+        name: m.ingredient,
+        quantity: Math.max(0.1, m.required - m.available),
+        unit: m.unit,
+      }));
+      console.log('Adding missing ingredients:', missingIngredients);
+      await shoppingListApi.addMissing(missingIngredients);
+      await fetchShoppingList();
+      Alert.alert('Added!', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to shopping list`);
+    } catch (error) {
+      console.error('Failed to add missing:', error);
+      Alert.alert('Error', 'Failed to add ingredients to shopping list');
+    } finally {
+      setCooking(false);
+    }
+  };
+
   const handleCook = async () => {
     if (!canCook) {
-      const missing = availability.filter(i => i.status === 'missing' || i.status === 'insufficient');
-      Alert.alert(
-        'Missing Ingredients',
-        `You're missing ${missing.length} ingredient${missing.length !== 1 ? 's' : ''}. Add them to shopping list?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Add to List',
-            onPress: async () => {
-              const missingIngredients = missing.map(m => ({
-                name: m.ingredient,
-                quantity: m.required - m.available,
-                unit: m.unit,
-              }));
-              await shoppingListApi.addMissing(missingIngredients);
-              await fetchShoppingList();
-              Alert.alert('Added', 'Missing ingredients added to shopping list');
-            },
-          },
-        ]
-      );
+      // Directly add missing items to shopping list
+      await handleAddMissingToList();
       return;
     }
 

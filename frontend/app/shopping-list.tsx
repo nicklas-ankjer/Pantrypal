@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,14 @@ import {
   Alert,
   Pressable,
   Modal,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../src/components/theme';
 import { useAppStore } from '../src/store/appStore';
-import { ShoppingListItem } from '../src/types';
+import { ShoppingListItem, HomeStockItem } from '../src/types';
 
 export default function ShoppingListScreen() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function ShoppingListScreen() {
   const [newItemUnit, setNewItemUnit] = useState('pieces');
   const [showAddForm, setShowAddForm] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   
   // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -38,18 +40,56 @@ export default function ShoppingListScreen() {
   
   const {
     shoppingList,
+    homeStock,
+    emergencyStock,
     fetchShoppingList,
+    fetchHomeStock,
+    fetchEmergencyStock,
     addShoppingListItem,
     updateShoppingListItem,
     deleteShoppingListItem,
     moveCheckedToStock,
-    fetchHomeStock,
     loading,
   } = useAppStore();
 
   useEffect(() => {
     fetchShoppingList();
+    fetchHomeStock();
+    fetchEmergencyStock();
   }, []);
+
+  // Get suggestions from home stock and emergency stock based on input
+  const suggestions = useMemo(() => {
+    if (!newItemName || newItemName.length < 1) return [];
+    
+    const searchTerm = newItemName.toLowerCase();
+    const allItems = [
+      ...homeStock.map(item => ({ ...item, source: 'home' })),
+      ...emergencyStock.map(item => ({ ...item, source: 'emergency' })),
+    ];
+    
+    // Filter items that match the search term
+    const matches = allItems.filter(item => 
+      item.name.toLowerCase().includes(searchTerm)
+    );
+    
+    // Remove duplicates by name (case insensitive)
+    const uniqueMatches = matches.reduce((acc, item) => {
+      const nameKey = item.name.toLowerCase();
+      if (!acc.find(i => i.name.toLowerCase() === nameKey)) {
+        acc.push(item);
+      }
+      return acc;
+    }, [] as typeof matches);
+    
+    return uniqueMatches.slice(0, 5); // Limit to 5 suggestions
+  }, [newItemName, homeStock, emergencyStock]);
+
+  const handleSelectSuggestion = (item: any) => {
+    setNewItemName(item.name);
+    setNewItemUnit(item.unit);
+    setShowSuggestions(false);
+  };
 
   const handleAddItem = async () => {
     if (!newItemName.trim()) return;
@@ -64,6 +104,7 @@ export default function ShoppingListScreen() {
       setNewItemName('');
       setNewItemQty('1');
       setShowAddForm(false);
+      setShowSuggestions(false);
     } catch (error) {
       console.error('Add item error:', error);
       Alert.alert('Error', 'Failed to add item');
@@ -204,17 +245,45 @@ export default function ShoppingListScreen() {
         </Pressable>
       </View>
 
-      {/* Add Form */}
+      {/* Add Form with Autocomplete */}
       {showAddForm && (
         <View style={styles.addForm}>
-          <TextInput
-            style={styles.input}
-            placeholder="Item name"
-            placeholderTextColor={colors.textMuted}
-            value={newItemName}
-            onChangeText={setNewItemName}
-            autoFocus
-          />
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Item name"
+              placeholderTextColor={colors.textMuted}
+              value={newItemName}
+              onChangeText={(text) => {
+                setNewItemName(text);
+                setShowSuggestions(text.length > 0);
+              }}
+              autoFocus
+            />
+            
+            {/* Suggestions dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <View style={styles.suggestionsContainer}>
+                <Text style={styles.suggestionsTitle}>Suggestions from your stock:</Text>
+                {suggestions.map((item, index) => (
+                  <Pressable
+                    key={`${item.id}-${index}`}
+                    style={styles.suggestionItem}
+                    onPress={() => handleSelectSuggestion(item)}
+                  >
+                    <Ionicons 
+                      name={item.source === 'home' ? 'cube-outline' : 'medkit-outline'} 
+                      size={18} 
+                      color={colors.primary} 
+                    />
+                    <Text style={styles.suggestionName}>{item.name}</Text>
+                    <Text style={styles.suggestionUnit}>({item.unit})</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+          
           <View style={styles.addFormRow}>
             <TextInput
               style={[styles.input, styles.qtyInput]}
@@ -413,6 +482,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  inputContainer: {
+    position: 'relative',
+    zIndex: 10,
+  },
   input: {
     backgroundColor: colors.background,
     borderRadius: borderRadius.md,
@@ -421,9 +494,46 @@ const styles = StyleSheet.create({
     ...typography.body,
     marginBottom: spacing.sm,
   },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.md,
+    marginTop: -spacing.sm,
+    ...shadows.lg,
+    zIndex: 100,
+    maxHeight: 200,
+  },
+  suggestionsTitle: {
+    ...typography.caption,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  suggestionName: {
+    ...typography.body,
+    marginLeft: spacing.sm,
+    flex: 1,
+  },
+  suggestionUnit: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
   addFormRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    zIndex: 1,
   },
   qtyInput: {
     width: 70,
@@ -459,6 +569,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
     marginTop: spacing.sm,
+    zIndex: 1,
   },
   addBtnText: {
     ...typography.body,

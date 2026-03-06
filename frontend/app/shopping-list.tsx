@@ -11,6 +11,7 @@ import {
   Platform,
   Alert,
   Pressable,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +28,13 @@ export default function ShoppingListScreen() {
   const [newItemUnit, setNewItemUnit] = useState('pieces');
   const [showAddForm, setShowAddForm] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
+  
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<ShoppingListItem | null>(null);
+  const [editQuantity, setEditQuantity] = useState('');
+  const [editUnit, setEditUnit] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
   const {
     shoppingList,
@@ -79,6 +87,38 @@ export default function ShoppingListScreen() {
     }
   };
 
+  const handleItemPress = (item: ShoppingListItem) => {
+    setSelectedItem(item);
+    setEditQuantity(item.quantity.toString());
+    setEditUnit(item.unit);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedItem) return;
+    
+    const newQty = parseFloat(editQuantity);
+    if (isNaN(newQty) || newQty <= 0) {
+      Alert.alert('Invalid', 'Please enter a valid quantity');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updateShoppingListItem(selectedItem.id, { 
+        quantity: newQty,
+        unit: editUnit 
+      });
+      setEditModalVisible(false);
+      setSelectedItem(null);
+    } catch (error) {
+      console.error('Update error:', error);
+      Alert.alert('Error', 'Failed to update item');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleMoveToStock = async () => {
     const checkedCount = shoppingList.filter(i => i.checked).length;
     if (checkedCount === 0) {
@@ -104,10 +144,16 @@ export default function ShoppingListScreen() {
   const checkedItems = shoppingList.filter(i => i.checked);
 
   const renderItem = ({ item }: { item: ShoppingListItem }) => (
-    <View style={[styles.itemCard, item.checked && styles.checkedCard]}>
+    <Pressable 
+      style={[styles.itemCard, item.checked && styles.checkedCard]}
+      onPress={() => handleItemPress(item)}
+    >
       <Pressable
         style={styles.checkbox}
-        onPress={() => handleToggleCheck(item)}
+        onPress={(e) => {
+          e.stopPropagation();
+          handleToggleCheck(item);
+        }}
       >
         <View style={[styles.checkboxInner, item.checked && styles.checkboxChecked]}>
           {item.checked && <Ionicons name="checkmark" size={16} color={colors.white} />}
@@ -121,16 +167,20 @@ export default function ShoppingListScreen() {
         <Text style={[styles.itemQty, item.checked && styles.checkedText]}>
           {item.quantity} {item.unit}
         </Text>
+        <Text style={styles.tapHint}>Tap to edit quantity</Text>
       </View>
       
       <Pressable
         style={styles.deleteBtn}
-        onPress={() => handleDelete(item)}
+        onPress={(e) => {
+          e.stopPropagation();
+          handleDelete(item);
+        }}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
         <Ionicons name="close-circle" size={24} color={colors.textMuted} />
       </Pressable>
-    </View>
+    </Pressable>
   );
 
   const units = ['pieces', 'grams', 'liters', 'kg', 'ml'];
@@ -242,6 +292,87 @@ export default function ShoppingListScreen() {
           </Pressable>
         </View>
       )}
+
+      {/* Edit Quantity Modal */}
+      <Modal
+        visible={editModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setEditModalVisible(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Edit Item</Text>
+            <Text style={styles.modalSubtitle}>{selectedItem?.name}</Text>
+            
+            <View style={styles.quantityInputContainer}>
+              <TextInput
+                style={styles.quantityInput}
+                value={editQuantity}
+                onChangeText={setEditQuantity}
+                keyboardType="numeric"
+                autoFocus
+                selectTextOnFocus
+              />
+            </View>
+
+            {/* Unit selector */}
+            <Text style={styles.unitLabel}>Unit</Text>
+            <View style={styles.modalUnitSelector}>
+              {units.map((unit) => (
+                <TouchableOpacity
+                  key={unit}
+                  style={[styles.modalUnitBtn, editUnit === unit && styles.modalUnitBtnActive]}
+                  onPress={() => setEditUnit(unit)}
+                >
+                  <Text style={[styles.modalUnitText, editUnit === unit && styles.modalUnitTextActive]}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Quick amounts */}
+            <View style={styles.quickAmounts}>
+              {[0.5, 1, 2, 5, 10].map((amount) => (
+                <TouchableOpacity
+                  key={amount}
+                  style={styles.quickAmountBtn}
+                  onPress={() => setEditQuantity(amount.toString())}
+                >
+                  <Text style={styles.quickAmountText}>{amount}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setEditModalVisible(false);
+                  setSelectedItem(null);
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveBtn}
+                onPress={handleSaveEdit}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -388,6 +519,13 @@ const styles = StyleSheet.create({
     ...typography.caption,
     marginTop: 2,
   },
+  tapHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontStyle: 'italic',
+    fontSize: 11,
+  },
   checkedText: {
     textDecorationLine: 'line-through',
     color: colors.textMuted,
@@ -441,5 +579,122 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: spacing.sm,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 340,
+  },
+  modalTitle: {
+    ...typography.h2,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  quantityInputContainer: {
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  quantityInput: {
+    ...typography.h1,
+    fontSize: 36,
+    textAlign: 'center',
+    minWidth: 150,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primary,
+    paddingVertical: spacing.sm,
+  },
+  unitLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  modalUnitSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  modalUnitBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    margin: 2,
+  },
+  modalUnitBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  modalUnitText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  modalUnitTextActive: {
+    color: colors.white,
+    fontWeight: '600',
+  },
+  quickAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  quickAmountBtn: {
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    margin: 2,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  quickAmountText: {
+    ...typography.bodySmall,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  modalSaveBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '600',
   },
 });

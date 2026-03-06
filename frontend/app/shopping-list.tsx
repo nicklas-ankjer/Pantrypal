@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ export default function ShoppingListScreen() {
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('pieces');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
   
   const {
     shoppingList,
@@ -33,6 +35,7 @@ export default function ShoppingListScreen() {
     updateShoppingListItem,
     deleteShoppingListItem,
     moveCheckedToStock,
+    fetchHomeStock,
     loading,
   } = useAppStore();
 
@@ -43,34 +46,37 @@ export default function ShoppingListScreen() {
   const handleAddItem = async () => {
     if (!newItemName.trim()) return;
     
-    await addShoppingListItem({
-      name: newItemName.trim(),
-      quantity: parseFloat(newItemQty) || 1,
-      unit: newItemUnit,
-    });
-    
-    setNewItemName('');
-    setNewItemQty('1');
-    setShowAddForm(false);
+    try {
+      await addShoppingListItem({
+        name: newItemName.trim(),
+        quantity: parseFloat(newItemQty) || 1,
+        unit: newItemUnit,
+      });
+      
+      setNewItemName('');
+      setNewItemQty('1');
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Add item error:', error);
+      Alert.alert('Error', 'Failed to add item');
+    }
   };
 
   const handleToggleCheck = async (item: ShoppingListItem) => {
-    await updateShoppingListItem(item.id, { checked: !item.checked });
+    try {
+      await updateShoppingListItem(item.id, { checked: !item.checked });
+    } catch (error) {
+      console.error('Toggle check error:', error);
+    }
   };
 
-  const handleDelete = (item: ShoppingListItem) => {
-    Alert.alert(
-      'Remove Item',
-      `Remove "${item.name}" from shopping list?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => deleteShoppingListItem(item.id),
-        },
-      ]
-    );
+  const handleDelete = async (item: ShoppingListItem) => {
+    try {
+      await deleteShoppingListItem(item.id);
+    } catch (error) {
+      console.error('Delete error:', error);
+      Alert.alert('Error', 'Failed to delete item');
+    }
   };
 
   const handleMoveToStock = async () => {
@@ -80,20 +86,18 @@ export default function ShoppingListScreen() {
       return;
     }
     
-    Alert.alert(
-      'Move to Stock',
-      `Move ${checkedCount} checked item${checkedCount !== 1 ? 's' : ''} to Home Stock?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Move',
-          onPress: async () => {
-            await moveCheckedToStock();
-            Alert.alert('Success', 'Items moved to Home Stock!');
-          },
-        },
-      ]
-    );
+    setIsMoving(true);
+    try {
+      await moveCheckedToStock();
+      await fetchHomeStock();
+      await fetchShoppingList();
+      Alert.alert('Success', `Moved ${checkedCount} item${checkedCount !== 1 ? 's' : ''} to Home Stock!`);
+    } catch (error) {
+      console.error('Move to stock error:', error);
+      Alert.alert('Error', 'Failed to move items to stock. Please try again.');
+    } finally {
+      setIsMoving(false);
+    }
   };
 
   const uncheckedItems = shoppingList.filter(i => !i.checked);
@@ -101,14 +105,14 @@ export default function ShoppingListScreen() {
 
   const renderItem = ({ item }: { item: ShoppingListItem }) => (
     <View style={[styles.itemCard, item.checked && styles.checkedCard]}>
-      <TouchableOpacity
+      <Pressable
         style={styles.checkbox}
         onPress={() => handleToggleCheck(item)}
       >
         <View style={[styles.checkboxInner, item.checked && styles.checkboxChecked]}>
           {item.checked && <Ionicons name="checkmark" size={16} color={colors.white} />}
         </View>
-      </TouchableOpacity>
+      </Pressable>
       
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, item.checked && styles.checkedText]}>
@@ -119,12 +123,13 @@ export default function ShoppingListScreen() {
         </Text>
       </View>
       
-      <TouchableOpacity
+      <Pressable
         style={styles.deleteBtn}
         onPress={() => handleDelete(item)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <Ionicons name="close-circle" size={22} color={colors.textMuted} />
-      </TouchableOpacity>
+        <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+      </Pressable>
     </View>
   );
 
@@ -136,17 +141,17 @@ export default function ShoppingListScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="close" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.title}>Shopping List</Text>
-        <TouchableOpacity onPress={() => setShowAddForm(!showAddForm)}>
+        <Pressable onPress={() => setShowAddForm(!showAddForm)}>
           <Ionicons
             name={showAddForm ? 'close-circle' : 'add-circle'}
             size={28}
             color={colors.primary}
           />
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* Add Form */}
@@ -171,7 +176,7 @@ export default function ShoppingListScreen() {
             />
             <View style={styles.unitSelector}>
               {units.map((unit) => (
-                <TouchableOpacity
+                <Pressable
                   key={unit}
                   style={[styles.unitBtn, newItemUnit === unit && styles.unitBtnActive]}
                   onPress={() => setNewItemUnit(unit)}
@@ -179,13 +184,13 @@ export default function ShoppingListScreen() {
                   <Text style={[styles.unitText, newItemUnit === unit && styles.unitTextActive]}>
                     {unit}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           </View>
-          <TouchableOpacity style={styles.addBtn} onPress={handleAddItem}>
+          <Pressable style={styles.addBtn} onPress={handleAddItem}>
             <Text style={styles.addBtnText}>Add to List</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       )}
 
@@ -209,24 +214,32 @@ export default function ShoppingListScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
-            uncheckedItems.length > 0 && checkedItems.length > 0 ? (
-              <Text style={styles.sectionLabel}>To Buy</Text>
+            uncheckedItems.length > 0 ? (
+              <Text style={styles.sectionLabel}>To Buy ({uncheckedItems.length})</Text>
             ) : null
           }
-          stickyHeaderIndices={uncheckedItems.length > 0 && checkedItems.length > 0 ? [0] : []}
         />
       )}
 
-      {/* Bottom Actions */}
+      {/* Bottom Actions - Always show when there are checked items */}
       {checkedItems.length > 0 && (
         <View style={[styles.bottomActions, { paddingBottom: insets.bottom + spacing.md }]}>
-          <TouchableOpacity
-            style={styles.moveToStockBtn}
+          <Pressable
+            style={[styles.moveToStockBtn, isMoving && styles.moveToStockBtnDisabled]}
             onPress={handleMoveToStock}
+            disabled={isMoving}
           >
-            <Ionicons name="arrow-forward" size={20} color={colors.white} />
-            <Text style={styles.moveToStockText}>Move Checked to Stock</Text>
-          </TouchableOpacity>
+            {isMoving ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <>
+                <Ionicons name="arrow-forward" size={20} color={colors.white} />
+                <Text style={styles.moveToStockText}>
+                  Move {checkedItems.length} Checked to Stock
+                </Text>
+              </>
+            )}
+          </Pressable>
         </View>
       )}
     </KeyboardAvoidingView>
@@ -255,6 +268,10 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: spacing.xs,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     ...typography.h2,
@@ -322,11 +339,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl * 4,
   },
   sectionLabel: {
-    ...typography.caption,
+    ...typography.bodySmall,
     fontWeight: '600',
     marginBottom: spacing.sm,
-    backgroundColor: colors.background,
-    paddingVertical: spacing.xs,
+    color: colors.textSecondary,
   },
   itemCard: {
     backgroundColor: colors.cardBackground,
@@ -339,13 +355,18 @@ const styles = StyleSheet.create({
   },
   checkedCard: {
     opacity: 0.6,
+    backgroundColor: colors.primaryLight + '20',
   },
   checkbox: {
     marginRight: spacing.md,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   checkboxInner: {
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     borderRadius: borderRadius.sm,
     borderWidth: 2,
     borderColor: colors.primary,
@@ -372,7 +393,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   deleteBtn: {
-    padding: spacing.xs,
+    padding: spacing.sm,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptyState: {
     flex: 1,
@@ -406,6 +431,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 52,
+  },
+  moveToStockBtnDisabled: {
+    opacity: 0.7,
   },
   moveToStockText: {
     ...typography.body,

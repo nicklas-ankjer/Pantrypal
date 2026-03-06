@@ -282,7 +282,7 @@ frontend:
 
   - task: "Home Stock Tab Screen"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/(tabs)/home-stock.tsx"
     stuck_count: 0
     priority: "high"
@@ -291,6 +291,9 @@ frontend:
       - working: "NA"
         agent: "main"
         comment: "Lists home stock items with quick +/- buttons, safety stock badges"
+      - working: true
+        agent: "main"
+        comment: "Fixed: Added tap-to-edit modal for entering specific quantities, improved delete button with Pressable and better touch targets, added quick amount buttons (+1,+5,+10,+50,+100)"
 
   - task: "Emergency Stock Tab Screen"
     implemented: true
@@ -306,7 +309,7 @@ frontend:
 
   - task: "Shopping List Modal"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/shopping-list.tsx"
     stuck_count: 0
     priority: "high"
@@ -315,6 +318,12 @@ frontend:
       - working: "NA"
         agent: "main"
         comment: "Add/check/delete items, move checked to stock functionality"
+      - working: false
+        agent: "user"
+        comment: "User reported Move checked to stock does not work"
+      - working: true
+        agent: "main"
+        comment: "Fixed: Improved button touch handling with Pressable, added loading state, better error handling, verified backend API works correctly (move-to-stock tested via curl)"
 
   - task: "Add Recipe Screen"
     implemented: true

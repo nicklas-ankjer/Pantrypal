@@ -14,7 +14,7 @@ import {
   Modal,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../src/components/theme';
@@ -23,6 +23,7 @@ import { ShoppingListItem, HomeStockItem } from '../src/types';
 
 export default function ShoppingListScreen() {
   const router = useRouter();
+  const { editItemId } = useLocalSearchParams<{ editItemId?: string }>();
   const insets = useSafeAreaInsets();
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState('1');
@@ -57,6 +58,19 @@ export default function ShoppingListScreen() {
     fetchHomeStock();
     fetchEmergencyStock();
   }, []);
+
+  // Auto-open edit modal if editItemId is passed
+  useEffect(() => {
+    if (editItemId && shoppingList.length > 0) {
+      const itemToEdit = shoppingList.find(item => item.id === editItemId);
+      if (itemToEdit) {
+        setSelectedItem(itemToEdit);
+        setEditQuantity(itemToEdit.quantity.toString());
+        setEditUnit(itemToEdit.unit);
+        setEditModalVisible(true);
+      }
+    }
+  }, [editItemId, shoppingList]);
 
   // Get suggestions from home stock and emergency stock based on input
   const suggestions = useMemo(() => {

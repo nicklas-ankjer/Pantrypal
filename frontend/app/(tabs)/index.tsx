@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../../src/components/theme';
 import { useAppStore } from '../../src/store/appStore';
+import { shoppingListApi } from '../../src/api/client';
 import { format, differenceInDays } from 'date-fns';
 
 export default function HomeScreen() {
@@ -58,6 +60,33 @@ export default function HomeScreen() {
     if (hour < 12) return 'Good Morning';
     if (hour < 18) return 'Good Afternoon';
     return 'Good Evening';
+  };
+
+  // Add low stock item to shopping list and navigate there
+  const handleAddToShoppingList = async (item: any) => {
+    try {
+      // Find the home stock item to get the unit
+      const stockItem = homeStock.find(s => s.id === item.id);
+      const unit = stockItem?.unit || 'pieces';
+      
+      // Add to shopping list with quantity 0 (user will enter)
+      const response = await shoppingListApi.create({
+        name: item.name,
+        quantity: 1, // Default to 1, user can edit
+        unit: unit,
+      });
+      
+      await fetchShoppingList();
+      
+      // Navigate to shopping list with the new item ID to edit
+      router.push({
+        pathname: '/shopping-list',
+        params: { editItemId: response.data.id }
+      });
+    } catch (error) {
+      console.error('Failed to add to shopping list:', error);
+      Alert.alert('Error', 'Failed to add item to shopping list');
+    }
   };
 
   if (loading && !dashboard) {
@@ -106,7 +135,7 @@ export default function HomeScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.alertAction}
-                  onPress={() => router.push('/shopping-list')}
+                  onPress={() => handleAddToShoppingList(item)}
                 >
                   <Ionicons name="add-circle" size={24} color={colors.warning} />
                 </TouchableOpacity>

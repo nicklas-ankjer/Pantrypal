@@ -20,6 +20,9 @@ export const homeStockApi = {
     api.post('/home-stock/quick-add', { item_id, quantity_change }),
   getLocations: () => api.get('/locations'),
   createLocation: (name: string) => api.post('/home-stock/locations', { name }),
+  renameLocation: (oldName: string, newName: string) => 
+    api.put(`/locations/${encodeURIComponent(oldName)}`, { name: newName }),
+  deleteLocation: (name: string) => api.delete(`/locations/${encodeURIComponent(name)}`),
 };
 
 // Emergency Stock API

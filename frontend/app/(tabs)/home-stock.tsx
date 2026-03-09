@@ -44,6 +44,12 @@ export default function HomeStockScreen() {
   const [addLocationModalVisible, setAddLocationModalVisible] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
   
+  // Edit location modal
+  const [editLocationModalVisible, setEditLocationModalVisible] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [editLocationName, setEditLocationName] = useState('');
+  const [isSavingLocation, setIsSavingLocation] = useState(false);
+  
   const { homeStock, fetchHomeStock, deleteHomeStockItem, updateHomeStockItem, quickAddHomeStock, loading } = useAppStore();
 
   useEffect(() => {
@@ -175,6 +181,76 @@ export default function HomeStockScreen() {
     }
   };
 
+  const handleEditLocationPress = (location: string) => {
+    if (location === 'Uncategorized') {
+      Alert.alert('Cannot Edit', 'The Uncategorized location cannot be renamed.');
+      return;
+    }
+    setSelectedLocation(location);
+    setEditLocationName(location);
+    setEditLocationModalVisible(true);
+  };
+
+  const handleSaveLocationName = async () => {
+    if (!editLocationName.trim()) {
+      Alert.alert('Error', 'Please enter a location name');
+      return;
+    }
+    
+    if (editLocationName.trim() === selectedLocation) {
+      setEditLocationModalVisible(false);
+      return;
+    }
+    
+    setIsSavingLocation(true);
+    try {
+      await homeStockApi.renameLocation(selectedLocation, editLocationName.trim());
+      await loadLocations();
+      await fetchHomeStock();
+      setEditLocationModalVisible(false);
+      setSelectedLocation('');
+      setEditLocationName('');
+    } catch (error) {
+      console.error('Failed to rename location:', error);
+      Alert.alert('Error', 'Failed to rename location');
+    } finally {
+      setIsSavingLocation(false);
+    }
+  };
+
+  const handleDeleteLocation = async () => {
+    if (selectedLocation === 'Uncategorized') {
+      Alert.alert('Cannot Delete', 'The Uncategorized location cannot be deleted.');
+      return;
+    }
+    
+    const itemCount = (itemsByLocation[selectedLocation] || []).length;
+    
+    Alert.alert(
+      'Delete Location',
+      `Are you sure you want to delete "${selectedLocation}"?${itemCount > 0 ? ` ${itemCount} item(s) will be moved to Uncategorized.` : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await homeStockApi.deleteLocation(selectedLocation);
+              await loadLocations();
+              await fetchHomeStock();
+              setEditLocationModalVisible(false);
+              setSelectedLocation('');
+            } catch (error) {
+              console.error('Failed to delete location:', error);
+              Alert.alert('Error', 'Failed to delete location');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getStockStatus = (item: HomeStockItem) => {
     if (item.safety_stock <= 0) return 'normal';
     if (item.quantity <= 0) return 'empty';
@@ -281,8 +357,21 @@ export default function HomeStockScreen() {
             />
             <Text style={styles.locationName}>{location}</Text>
           </View>
-          <View style={styles.locationBadge}>
-            <Text style={styles.locationCount}>{items.length}</Text>
+          <View style={styles.locationRight}>
+            {location !== 'Uncategorized' && (
+              <Pressable
+                style={styles.editLocationBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleEditLocationPress(location);
+                }}
+              >
+                <Ionicons name="pencil-outline" size={16} color={colors.textMuted} />
+              </Pressable>
+            )}
+            <View style={styles.locationBadge}>
+              <Text style={styles.locationCount}>{items.length}</Text>
+            </View>
           </View>
         </Pressable>
         
@@ -534,6 +623,65 @@ export default function HomeStockScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Edit Location Modal */}
+      <Modal
+        visible={editLocationModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditLocationModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setEditLocationModalVisible(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Edit Location</Text>
+            <Text style={styles.modalSubtitle}>Rename or delete this location</Text>
+            
+            <TextInput
+              style={styles.locationInput}
+              placeholder="Location name"
+              placeholderTextColor={colors.textMuted}
+              value={editLocationName}
+              onChangeText={setEditLocationName}
+              autoFocus
+            />
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setEditLocationModalVisible(false);
+                  setSelectedLocation('');
+                  setEditLocationName('');
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveBtn}
+                onPress={handleSaveLocationName}
+                disabled={isSavingLocation}
+              >
+                {isSavingLocation ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity
+              style={styles.deleteLocationBtn}
+              onPress={handleDeleteLocation}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              <Text style={styles.deleteLocationText}>Delete Location</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -602,6 +750,14 @@ const styles = StyleSheet.create({
   locationName: {
     ...typography.h3,
     marginLeft: spacing.sm,
+  },
+  locationRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  editLocationBtn: {
+    padding: spacing.sm,
+    marginRight: spacing.sm,
   },
   locationBadge: {
     backgroundColor: colors.primaryLight + '30',
@@ -859,5 +1015,17 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     backgroundColor: colors.danger,
     alignItems: 'center',
+  },
+  deleteLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  deleteLocationText: {
+    ...typography.bodySmall,
+    color: colors.danger,
+    marginLeft: spacing.xs,
   },
 });

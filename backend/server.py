@@ -231,6 +231,58 @@ async def get_all_locations():
     
     return {"locations": sorted(list(locations))}
 
+@api_router.put("/locations/{old_name}")
+async def rename_location(old_name: str, data: dict):
+    """Rename a location - updates all items with that location"""
+    new_name = data.get("name")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="New name is required")
+    
+    if old_name == "Uncategorized":
+        raise HTTPException(status_code=400, detail="Cannot rename Uncategorized")
+    
+    # Update all items with this location
+    result = await db.home_stock.update_many(
+        {"location": old_name},
+        {"$set": {"location": new_name, "updated_at": datetime.utcnow()}}
+    )
+    
+    # Update the location in locations collection if it exists
+    await db.locations.update_one(
+        {"name": old_name},
+        {"$set": {"name": new_name}},
+        upsert=True
+    )
+    
+    # Delete old location entry if different name
+    if old_name != new_name:
+        await db.locations.delete_one({"name": old_name})
+    
+    return {
+        "message": f"Renamed '{old_name}' to '{new_name}'",
+        "items_updated": result.modified_count
+    }
+
+@api_router.delete("/locations/{name}")
+async def delete_location(name: str):
+    """Delete a location - moves all items to Uncategorized"""
+    if name == "Uncategorized":
+        raise HTTPException(status_code=400, detail="Cannot delete Uncategorized")
+    
+    # Move all items to Uncategorized
+    result = await db.home_stock.update_many(
+        {"location": name},
+        {"$set": {"location": "Uncategorized", "updated_at": datetime.utcnow()}}
+    )
+    
+    # Delete the location
+    await db.locations.delete_one({"name": name})
+    
+    return {
+        "message": f"Deleted location '{name}'",
+        "items_moved": result.modified_count
+    }
+
 # ==================== EMERGENCY STOCK ENDPOINTS ====================
 
 @api_router.get("/emergency-stock", response_model=List[EmergencyStockItemResponse])

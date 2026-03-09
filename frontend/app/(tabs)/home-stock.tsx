@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,34 +11,130 @@ import {
   Modal,
   Pressable,
   TextInput,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../../src/components/theme';
 import { useAppStore } from '../../src/store/appStore';
+import { homeStockApi } from '../../src/api/client';
 import { HomeStockItem } from '../../src/types';
 
 export default function HomeStockScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedLocations, setExpandedLocations] = useState<Set<string>>(new Set(['Uncategorized']));
+  const [locations, setLocations] = useState<string[]>(['Uncategorized']);
+  
+  // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<HomeStockItem | null>(null);
   const [editQuantity, setEditQuantity] = useState('');
+  const [editUnit, setEditUnit] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Delete modal state
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Add location modal
+  const [addLocationModalVisible, setAddLocationModalVisible] = useState(false);
+  const [newLocationName, setNewLocationName] = useState('');
   
   const { homeStock, fetchHomeStock, deleteHomeStockItem, updateHomeStockItem, quickAddHomeStock, loading } = useAppStore();
 
   useEffect(() => {
     fetchHomeStock();
+    loadLocations();
   }, []);
+
+  const loadLocations = async () => {
+    try {
+      const response = await homeStockApi.getLocations();
+      setLocations(response.data.locations);
+      // Expand all locations by default
+      setExpandedLocations(new Set(response.data.locations));
+    } catch (error) {
+      console.error('Failed to load locations:', error);
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchHomeStock();
+    await loadLocations();
     setRefreshing(false);
+  };
+
+  // Group items by location
+  const itemsByLocation = useMemo(() => {
+    const grouped: { [key: string]: HomeStockItem[] } = {};
+    
+    // Initialize all known locations
+    locations.forEach(loc => {
+      grouped[loc] = [];
+    });
+    
+    // Group items
+    homeStock.forEach(item => {
+      const loc = item.location || 'Uncategorized';
+      if (!grouped[loc]) {
+        grouped[loc] = [];
+      }
+      grouped[loc].push(item);
+    });
+    
+    return grouped;
+  }, [homeStock, locations]);
+
+  const toggleLocation = (location: string) => {
+    setExpandedLocations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(location)) {
+        newSet.delete(location);
+      } else {
+        newSet.add(location);
+      }
+      return newSet;
+    });
+  };
+
+  const handleItemPress = (item: HomeStockItem) => {
+    setSelectedItem(item);
+    setEditQuantity(item.quantity.toString());
+    setEditUnit(item.unit);
+    setEditLocation(item.location || 'Uncategorized');
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedItem) return;
+    
+    const newQty = parseFloat(editQuantity);
+    if (isNaN(newQty) || newQty < 0) {
+      Alert.alert('Invalid', 'Please enter a valid quantity');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updateHomeStockItem(selectedItem.id, { 
+        quantity: newQty,
+        unit: editUnit,
+        location: editLocation,
+      });
+      setEditModalVisible(false);
+      setSelectedItem(null);
+      await loadLocations();
+    } catch (error) {
+      console.error('Update error:', error);
+      Alert.alert('Error', 'Failed to update item');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeletePress = (item: HomeStockItem) => {
@@ -51,9 +147,7 @@ export default function HomeStockScreen() {
     
     setIsDeleting(true);
     try {
-      console.log('Confirming delete for:', selectedItem.id);
       await deleteHomeStockItem(selectedItem.id);
-      console.log('Delete successful');
       setDeleteModalVisible(false);
       setSelectedItem(null);
     } catch (error) {
@@ -64,28 +158,20 @@ export default function HomeStockScreen() {
     }
   };
 
-  const handleItemPress = (item: HomeStockItem) => {
-    setSelectedItem(item);
-    setEditQuantity(item.quantity.toString());
-    setEditModalVisible(true);
-  };
-
-  const handleSaveQuantity = async () => {
-    if (!selectedItem) return;
-    
-    const newQty = parseFloat(editQuantity);
-    if (isNaN(newQty) || newQty < 0) {
-      Alert.alert('Invalid', 'Please enter a valid quantity');
+  const handleAddLocation = async () => {
+    if (!newLocationName.trim()) {
+      Alert.alert('Error', 'Please enter a location name');
       return;
     }
-
+    
     try {
-      await updateHomeStockItem(selectedItem.id, { quantity: newQty });
-      setEditModalVisible(false);
-      setSelectedItem(null);
+      await homeStockApi.createLocation(newLocationName.trim());
+      await loadLocations();
+      setAddLocationModalVisible(false);
+      setNewLocationName('');
     } catch (error) {
-      console.error('Update error:', error);
-      Alert.alert('Error', 'Failed to update quantity');
+      console.error('Failed to create location:', error);
+      Alert.alert('Error', 'Failed to create location');
     }
   };
 
@@ -96,11 +182,14 @@ export default function HomeStockScreen() {
     return 'normal';
   };
 
-  const renderItem = ({ item }: { item: HomeStockItem }) => {
+  const units = ['pieces', 'grams', 'liters', 'kg', 'ml'];
+
+  const renderItem = (item: HomeStockItem) => {
     const status = getStockStatus(item);
     
     return (
       <Pressable 
+        key={item.id}
         style={[
           styles.itemCard,
           status === 'low' && styles.lowStockCard,
@@ -130,7 +219,7 @@ export default function HomeStockScreen() {
               </Text>
             )}
           </Text>
-          <Text style={styles.tapHint}>Tap to edit quantity</Text>
+          <Text style={styles.tapHint}>Tap to edit</Text>
         </View>
         
         <View style={styles.itemActions}>
@@ -155,7 +244,7 @@ export default function HomeStockScreen() {
             </Pressable>
           </View>
           <Pressable
-            style={styles.deleteBtn}
+            style={styles.trashBtn}
             onPress={(e) => {
               e.stopPropagation();
               handleDeletePress(item);
@@ -168,54 +257,93 @@ export default function HomeStockScreen() {
     );
   };
 
+  const renderLocationSection = (location: string) => {
+    const items = itemsByLocation[location] || [];
+    const isExpanded = expandedLocations.has(location);
+    
+    return (
+      <View key={location} style={styles.locationSection}>
+        <Pressable 
+          style={styles.locationHeader}
+          onPress={() => toggleLocation(location)}
+        >
+          <View style={styles.locationLeft}>
+            <Ionicons 
+              name={isExpanded ? 'chevron-down' : 'chevron-forward'} 
+              size={20} 
+              color={colors.textPrimary} 
+            />
+            <Ionicons 
+              name={location === 'Uncategorized' ? 'cube-outline' : 'folder-outline'} 
+              size={20} 
+              color={colors.primary}
+              style={{ marginLeft: spacing.sm }}
+            />
+            <Text style={styles.locationName}>{location}</Text>
+          </View>
+          <View style={styles.locationBadge}>
+            <Text style={styles.locationCount}>{items.length}</Text>
+          </View>
+        </Pressable>
+        
+        {isExpanded && (
+          <View style={styles.locationItems}>
+            {items.length === 0 ? (
+              <Text style={styles.emptyLocationText}>No items in this location</Text>
+            ) : (
+              items.map(item => renderItem(item))
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Home Stock</Text>
-        <Text style={styles.subtitle}>{homeStock.length} items</Text>
+        <View>
+          <Text style={styles.title}>Home Stock</Text>
+          <Text style={styles.subtitle}>{homeStock.length} items in {locations.length} locations</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.addLocationBtn}
+          onPress={() => setAddLocationModalVisible(true)}
+        >
+          <Ionicons name="folder-open-outline" size={20} color={colors.primary} />
+          <Text style={styles.addLocationText}>Add Location</Text>
+        </TouchableOpacity>
       </View>
 
       {loading && homeStock.length === 0 ? (
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      ) : homeStock.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="cube-outline" size={64} color={colors.textMuted} />
-          <Text style={styles.emptyTitle}>No Items Yet</Text>
-          <Text style={styles.emptySubtitle}>
-            Add items to track your household inventory
-          </Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => router.push('/add-home-stock')}
-          >
-            <Ionicons name="add" size={20} color={colors.white} />
-            <Text style={styles.addButtonText}>Add Item</Text>
-          </TouchableOpacity>
-        </View>
       ) : (
-        <FlatList
-          data={homeStock}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-        />
-      )}
-
-      {homeStock.length > 0 && (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push('/add-home-stock')}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+            />
+          }
         >
-          <Ionicons name="add" size={28} color={colors.white} />
-        </TouchableOpacity>
+          {locations.map(location => renderLocationSection(location))}
+        </ScrollView>
       )}
 
-      {/* Edit Quantity Modal */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => router.push('/add-home-stock')}
+      >
+        <Ionicons name="add" size={28} color={colors.white} />
+      </TouchableOpacity>
+
+      {/* Edit Modal */}
       <Modal
         visible={editModalVisible}
         transparent
@@ -227,21 +355,22 @@ export default function HomeStockScreen() {
           onPress={() => setEditModalVisible(false)}
         >
           <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Edit Quantity</Text>
+            <Text style={styles.modalTitle}>Edit Item</Text>
             <Text style={styles.modalSubtitle}>{selectedItem?.name}</Text>
             
+            {/* Quantity */}
+            <Text style={styles.fieldLabel}>Quantity</Text>
             <View style={styles.quantityInputContainer}>
               <TextInput
                 style={styles.quantityInput}
                 value={editQuantity}
                 onChangeText={setEditQuantity}
                 keyboardType="numeric"
-                autoFocus
                 selectTextOnFocus
               />
-              <Text style={styles.unitLabel}>{selectedItem?.unit}</Text>
             </View>
 
+            {/* Quick amounts */}
             <View style={styles.quickAmounts}>
               {[1, 5, 10, 50, 100].map((amount) => (
                 <TouchableOpacity
@@ -257,18 +386,58 @@ export default function HomeStockScreen() {
               ))}
             </View>
 
+            {/* Unit selector */}
+            <Text style={styles.fieldLabel}>Unit</Text>
+            <View style={styles.modalUnitSelector}>
+              {units.map((unit) => (
+                <TouchableOpacity
+                  key={unit}
+                  style={[styles.modalUnitBtn, editUnit === unit && styles.modalUnitBtnActive]}
+                  onPress={() => setEditUnit(unit)}
+                >
+                  <Text style={[styles.modalUnitText, editUnit === unit && styles.modalUnitTextActive]}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Location selector */}
+            <Text style={styles.fieldLabel}>Location</Text>
+            <View style={styles.modalUnitSelector}>
+              {locations.map((loc) => (
+                <TouchableOpacity
+                  key={loc}
+                  style={[styles.modalUnitBtn, editLocation === loc && styles.modalUnitBtnActive]}
+                  onPress={() => setEditLocation(loc)}
+                >
+                  <Text style={[styles.modalUnitText, editLocation === loc && styles.modalUnitTextActive]}>
+                    {loc}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
-                onPress={() => setEditModalVisible(false)}
+                onPress={() => {
+                  setEditModalVisible(false);
+                  setSelectedItem(null);
+                }}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.modalSaveBtn}
-                onPress={handleSaveQuantity}
+                onPress={handleSaveEdit}
+                disabled={isSaving}
               >
-                <Text style={styles.modalSaveText}>Save</Text>
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save</Text>
+                )}
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -306,7 +475,7 @@ export default function HomeStockScreen() {
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSaveBtn, styles.deleteBtn]}
+                style={styles.deleteConfirmBtn}
                 onPress={confirmDelete}
                 disabled={isDeleting}
               >
@@ -315,6 +484,51 @@ export default function HomeStockScreen() {
                 ) : (
                   <Text style={styles.modalSaveText}>Delete</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Add Location Modal */}
+      <Modal
+        visible={addLocationModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAddLocationModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setAddLocationModalVisible(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Add Location</Text>
+            <Text style={styles.modalSubtitle}>Create a new storage location</Text>
+            
+            <TextInput
+              style={styles.locationInput}
+              placeholder="e.g., Freezer, Pantry, Fridge"
+              placeholderTextColor={colors.textMuted}
+              value={newLocationName}
+              onChangeText={setNewLocationName}
+              autoFocus
+            />
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setAddLocationModalVisible(false);
+                  setNewLocationName('');
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveBtn}
+                onPress={handleAddLocation}
+              >
+                <Text style={styles.modalSaveText}>Create</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -335,6 +549,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -342,18 +559,76 @@ const styles = StyleSheet.create({
     ...typography.h1,
   },
   subtitle: {
-    ...typography.bodySmall,
+    ...typography.caption,
     marginTop: spacing.xs,
   },
-  listContent: {
+  addLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryLight + '30',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+  },
+  addLocationText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+    marginLeft: spacing.xs,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
     padding: spacing.md,
     paddingBottom: spacing.xl * 3,
+  },
+  locationSection: {
+    marginBottom: spacing.md,
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  locationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationName: {
+    ...typography.h3,
+    marginLeft: spacing.sm,
+  },
+  locationBadge: {
+    backgroundColor: colors.primaryLight + '30',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  locationCount: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  locationItems: {
+    paddingLeft: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  emptyLocationText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    paddingVertical: spacing.sm,
   },
   itemCard: {
     backgroundColor: colors.cardBackground,
     borderRadius: borderRadius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     ...shadows.sm,
@@ -374,7 +649,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   itemName: {
-    ...typography.h3,
+    ...typography.body,
+    fontWeight: '600',
   },
   statusBadge: {
     paddingHorizontal: spacing.sm,
@@ -394,7 +670,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   itemQuantity: {
-    ...typography.body,
+    ...typography.bodySmall,
     marginTop: 4,
   },
   safetyText: {
@@ -405,6 +681,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
     fontStyle: 'italic',
+    fontSize: 11,
   },
   itemActions: {
     flexDirection: 'row',
@@ -418,47 +695,17 @@ const styles = StyleSheet.create({
   },
   quickBtn: {
     padding: spacing.sm,
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 40,
+    minHeight: 40,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  deleteBtn: {
+  trashBtn: {
     padding: spacing.sm,
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 40,
+    minHeight: 40,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-  },
-  emptyTitle: {
-    ...typography.h2,
-    marginTop: spacing.md,
-  },
-  emptySubtitle: {
-    ...typography.bodySmall,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.full,
-    marginTop: spacing.lg,
-  },
-  addButtonText: {
-    ...typography.body,
-    color: colors.white,
-    fontWeight: '600',
-    marginLeft: spacing.sm,
   },
   fab: {
     position: 'absolute',
@@ -486,6 +733,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     width: '100%',
     maxWidth: 340,
+    maxHeight: '80%',
   },
   modalTitle: {
     ...typography.h2,
@@ -497,31 +745,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.xs,
   },
+  fieldLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
   quantityInputContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.lg,
   },
   quantityInput: {
     ...typography.h1,
     fontSize: 36,
     textAlign: 'center',
-    minWidth: 120,
+    minWidth: 150,
     borderBottomWidth: 2,
     borderBottomColor: colors.primary,
     paddingVertical: spacing.sm,
-  },
-  unitLabel: {
-    ...typography.h3,
-    color: colors.textSecondary,
-    marginLeft: spacing.sm,
   },
   quickAmounts: {
     flexDirection: 'row',
     justifyContent: 'center',
     flexWrap: 'wrap',
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     gap: spacing.xs,
   },
   quickAmountBtn: {
@@ -530,11 +776,44 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.md,
     margin: 2,
+    minWidth: 50,
+    alignItems: 'center',
   },
   quickAmountText: {
     ...typography.bodySmall,
     color: colors.primary,
     fontWeight: '600',
+  },
+  modalUnitSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  modalUnitBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    margin: 2,
+  },
+  modalUnitBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  modalUnitText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+  modalUnitTextActive: {
+    color: colors.white,
+    fontWeight: '600',
+  },
+  locationInput: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    ...typography.body,
+    marginTop: spacing.md,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -564,7 +843,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
   },
-  // Delete modal styles
   deleteIconContainer: {
     alignItems: 'center',
     marginBottom: spacing.md,
@@ -575,7 +853,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
   },
-  deleteBtn: {
+  deleteConfirmBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
     backgroundColor: colors.danger,
+    alignItems: 'center',
   },
 });

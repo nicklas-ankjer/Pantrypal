@@ -59,12 +59,14 @@ class HomeStockItemCreate(BaseModel):
     quantity: float
     unit: str  # grams, liters, pieces
     safety_stock: float = 0
+    location: str = "Uncategorized"
 
 class HomeStockItemUpdate(BaseModel):
     name: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
     safety_stock: Optional[float] = None
+    location: Optional[str] = None
 
 class HomeStockItemResponse(BaseModel):
     id: str
@@ -72,6 +74,7 @@ class HomeStockItemResponse(BaseModel):
     quantity: float
     unit: str
     safety_stock: float
+    location: str = "Uncategorized"
     created_at: datetime
     updated_at: datetime
 
@@ -129,7 +132,14 @@ class QuickAddRequest(BaseModel):
 @api_router.get("/home-stock", response_model=List[HomeStockItemResponse])
 async def get_home_stock():
     items = await db.home_stock.find().to_list(1000)
-    return [HomeStockItemResponse(**serialize_doc(item)) for item in items]
+    result = []
+    for item in items:
+        doc = serialize_doc(item)
+        # Add default location for items that don't have it
+        if 'location' not in doc:
+            doc['location'] = 'Uncategorized'
+        result.append(HomeStockItemResponse(**doc))
+    return result
 
 @api_router.post("/home-stock", response_model=HomeStockItemResponse)
 async def create_home_stock_item(item: HomeStockItemCreate):
@@ -181,6 +191,45 @@ async def quick_add_home_stock(request: QuickAddRequest):
     
     updated = await db.home_stock.find_one({"_id": ObjectId(request.item_id)})
     return HomeStockItemResponse(**serialize_doc(updated))
+
+@api_router.get("/home-stock/locations")
+async def get_home_stock_locations():
+    """Get all unique locations from home stock items"""
+    items = await db.home_stock.find().to_list(1000)
+    locations = set()
+    for item in items:
+        loc = item.get('location', 'Uncategorized')
+        locations.add(loc)
+    return {"locations": sorted(list(locations))}
+
+@api_router.post("/home-stock/locations")
+async def create_location(location: dict):
+    """Store a new location (for persistence even when empty)"""
+    existing = await db.locations.find_one({"name": location.get("name")})
+    if existing:
+        return {"message": "Location already exists", "name": location.get("name")}
+    
+    await db.locations.insert_one({
+        "name": location.get("name"),
+        "created_at": datetime.utcnow()
+    })
+    return {"message": "Location created", "name": location.get("name")}
+
+@api_router.get("/locations")
+async def get_all_locations():
+    """Get all stored locations"""
+    # Get locations from both the locations collection and from items
+    stored = await db.locations.find().to_list(100)
+    items = await db.home_stock.find().to_list(1000)
+    
+    locations = set(["Uncategorized"])  # Always include Uncategorized
+    for loc in stored:
+        locations.add(loc.get('name'))
+    for item in items:
+        loc = item.get('location', 'Uncategorized')
+        locations.add(loc)
+    
+    return {"locations": sorted(list(locations))}
 
 # ==================== EMERGENCY STOCK ENDPOINTS ====================
 

@@ -31,7 +31,6 @@ export default function HomeScreen() {
     fetchShoppingList,
     fetchRecipes,
     fetchEmergencyStock,
-    quickAddHomeStock,
     loading,
   } = useAppStore();
 
@@ -213,49 +212,6 @@ export default function HomeScreen() {
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </View>
         </TouchableOpacity>
-
-        {/* Quick Add Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="flash-outline" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Quick Adjust</Text>
-          </View>
-          <View style={styles.quickAddGrid}>
-            {homeStock.slice(0, 6).map((item) => (
-              <View key={item.id} style={styles.quickAddItem}>
-                <Text style={styles.quickAddName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={styles.quickAddQty}>
-                  {item.quantity} {item.unit}
-                </Text>
-                <View style={styles.quickAddButtons}>
-                  <TouchableOpacity
-                    style={styles.quickAddBtn}
-                    onPress={() => quickAddHomeStock(item.id, -1)}
-                  >
-                    <Ionicons name="remove" size={18} color={colors.danger} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.quickAddBtn}
-                    onPress={() => quickAddHomeStock(item.id, 1)}
-                  >
-                    <Ionicons name="add" size={18} color={colors.primary} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-          {homeStock.length === 0 && (
-            <TouchableOpacity
-              style={styles.emptyQuickAdd}
-              onPress={() => router.push('/add-home-stock')}
-            >
-              <Ionicons name="add-circle-outline" size={32} color={colors.textMuted} />
-              <Text style={styles.emptyText}>Add items to your stock</Text>
-            </TouchableOpacity>
-          )}
-        </View>
       </ScrollView>
     </View>
   );

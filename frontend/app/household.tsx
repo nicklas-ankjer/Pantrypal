@@ -55,6 +55,14 @@ export default function HouseholdScreen() {
       Alert.alert('Error', 'Please enter a household name');
       return;
     }
+    
+    // If user is not authenticated, redirect to auth first
+    if (!user) {
+      setShowCreateModal(false);
+      router.push('/auth');
+      return;
+    }
+    
     const success = await createHousehold(householdName.trim());
     if (success) {
       setShowCreateModal(false);
@@ -67,6 +75,14 @@ export default function HouseholdScreen() {
       Alert.alert('Error', 'Please enter an invite code');
       return;
     }
+    
+    // If user is not authenticated, redirect to auth first
+    if (!user) {
+      setShowJoinModal(false);
+      router.push('/auth');
+      return;
+    }
+    
     const success = await joinHousehold(inviteCode.trim().toUpperCase());
     if (success) {
       setShowJoinModal(false);

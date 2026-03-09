@@ -5,13 +5,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, borderRadius, spacing } from '../../src/components/theme';
 import { useAppStore } from '../../src/store/appStore';
-import { useAuthStore } from '../../src/store/authStore';
 
 export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { shoppingList } = useAppStore();
-  const { isAuthenticated, household } = useAuthStore();
   
   const uncheckedCount = shoppingList.filter(item => !item.checked).length;
 
@@ -45,20 +43,13 @@ export default function TabLayout() {
             {/* Household/Invite Button */}
             <TouchableOpacity
               style={styles.headerButton}
-              onPress={() => isAuthenticated ? router.push('/household') : router.push('/auth')}
+              onPress={() => router.push('/household')}
             >
-              <View>
-                <Ionicons 
-                  name={household ? 'people' : 'person-add-outline'} 
-                  size={24} 
-                  color={household ? colors.primary : colors.textMuted} 
-                />
-                {household && household.members.length > 1 && (
-                  <View style={styles.memberBadge}>
-                    <Text style={styles.badgeText}>{household.members.length}</Text>
-                  </View>
-                )}
-              </View>
+              <Ionicons 
+                name="people-outline"
+                size={24} 
+                color={colors.textMuted} 
+              />
             </TouchableOpacity>
             
             {/* Shopping List Button */}
@@ -135,18 +126,6 @@ const styles = StyleSheet.create({
     top: -4,
     right: -8,
     backgroundColor: colors.danger,
-    borderRadius: borderRadius.full,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  memberBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -8,
-    backgroundColor: colors.success,
     borderRadius: borderRadius.full,
     minWidth: 18,
     height: 18,

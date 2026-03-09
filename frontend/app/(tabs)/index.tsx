@@ -14,7 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../../src/components/theme';
 import { useAppStore } from '../../src/store/appStore';
-import { useAuthStore } from '../../src/store/authStore';
 import { shoppingListApi } from '../../src/api/client';
 import { format, differenceInDays } from 'date-fns';
 
@@ -22,8 +21,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
-  
-  const { user, household, isAuthenticated } = useAuthStore();
   
   const {
     dashboard,
@@ -120,37 +117,6 @@ export default function HomeScreen() {
           <View style={styles.headerLeft}>
             <Text style={styles.greeting}>{getGreeting()}</Text>
             <Text style={styles.date}>{format(new Date(), 'EEEE, MMMM d')}</Text>
-          </View>
-          <View style={styles.headerIcons}>
-            {/* Household/Invite Button */}
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => isAuthenticated ? router.push('/household') : router.push('/auth')}
-            >
-              <Ionicons 
-                name={household ? 'people' : 'person-add-outline'} 
-                size={24} 
-                color={household ? colors.primary : colors.textMuted} 
-              />
-              {household && household.members.length > 1 && (
-                <View style={styles.householdBadge}>
-                  <Text style={styles.householdBadgeText}>{household.members.length}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            
-            {/* Shopping List Button */}
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => router.push('/shopping-list')}
-            >
-              <Ionicons name="cart-outline" size={24} color={colors.text} />
-              {shoppingList.length > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{shoppingList.length}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -317,56 +283,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl * 2,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
     marginBottom: spacing.lg,
   },
   headerLeft: {
     flex: 1,
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  headerIconBtn: {
-    padding: spacing.sm,
-    position: 'relative',
-  },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  badgeText: {
-    color: colors.white,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  householdBadge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: colors.success,
-    borderRadius: 10,
-    minWidth: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 3,
-  },
-  householdBadgeText: {
-    color: colors.white,
-    fontSize: 9,
-    fontWeight: '700',
   },
   greeting: {
     ...typography.h1,

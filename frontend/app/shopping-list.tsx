@@ -28,15 +28,18 @@ export default function ShoppingListScreen() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('pieces');
+  const [newItemLocation, setNewItemLocation] = useState('Uncategorized');
   const [showAddForm, setShowAddForm] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [locations, setLocations] = useState<string[]>(['Uncategorized']);
   
   // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ShoppingListItem | null>(null);
   const [editQuantity, setEditQuantity] = useState('');
   const [editUnit, setEditUnit] = useState('');
+  const [editLocation, setEditLocation] = useState('Uncategorized');
   const [isSaving, setIsSaving] = useState(false);
   
   const {
@@ -53,10 +56,24 @@ export default function ShoppingListScreen() {
     loading,
   } = useAppStore();
 
+  // Fetch locations from API
+  const fetchLocations = async () => {
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/locations`);
+      const data = await response.json();
+      if (data.locations && data.locations.length > 0) {
+        setLocations(data.locations);
+      }
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+    }
+  };
+
   useEffect(() => {
     fetchShoppingList();
     fetchHomeStock();
     fetchEmergencyStock();
+    fetchLocations();
   }, []);
 
   // Auto-open edit modal if editItemId is passed
@@ -67,6 +84,7 @@ export default function ShoppingListScreen() {
         setSelectedItem(itemToEdit);
         setEditQuantity(itemToEdit.quantity.toString());
         setEditUnit(itemToEdit.unit);
+        setEditLocation(itemToEdit.location || 'Uncategorized');
         setEditModalVisible(true);
       }
     }
@@ -113,10 +131,12 @@ export default function ShoppingListScreen() {
         name: newItemName.trim(),
         quantity: parseFloat(newItemQty) || 1,
         unit: newItemUnit,
+        location: newItemLocation,
       });
       
       setNewItemName('');
       setNewItemQty('1');
+      setNewItemLocation('Uncategorized');
       setShowAddForm(false);
       setShowSuggestions(false);
     } catch (error) {
@@ -146,6 +166,7 @@ export default function ShoppingListScreen() {
     setSelectedItem(item);
     setEditQuantity(item.quantity.toString());
     setEditUnit(item.unit);
+    setEditLocation(item.location || 'Uncategorized');
     setEditModalVisible(true);
   };
 
@@ -162,7 +183,8 @@ export default function ShoppingListScreen() {
     try {
       await updateShoppingListItem(selectedItem.id, { 
         quantity: newQty,
-        unit: editUnit 
+        unit: editUnit,
+        location: editLocation 
       });
       setEditModalVisible(false);
       setSelectedItem(null);
@@ -222,7 +244,13 @@ export default function ShoppingListScreen() {
         <Text style={[styles.itemQty, item.checked && styles.checkedText]}>
           {item.quantity} {item.unit}
         </Text>
-        <Text style={styles.tapHint}>Tap to edit quantity</Text>
+        {item.location && item.location !== 'Uncategorized' && (
+          <View style={styles.itemLocationBadge}>
+            <Ionicons name="location-outline" size={12} color={colors.primary} />
+            <Text style={styles.itemLocationText}>{item.location}</Text>
+          </View>
+        )}
+        <Text style={styles.tapHint}>Tap to edit</Text>
       </View>
       
       <Pressable
@@ -321,6 +349,33 @@ export default function ShoppingListScreen() {
               ))}
             </View>
           </View>
+          
+          {/* Location selector for add form */}
+          <Text style={styles.locationLabel}>Store in location:</Text>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.locationScroll}
+            contentContainerStyle={styles.locationScrollContent}
+          >
+            {locations.map((loc) => (
+              <Pressable
+                key={loc}
+                style={[styles.locationChip, newItemLocation === loc && styles.locationChipActive]}
+                onPress={() => setNewItemLocation(loc)}
+              >
+                <Ionicons 
+                  name={newItemLocation === loc ? 'location' : 'location-outline'} 
+                  size={14} 
+                  color={newItemLocation === loc ? colors.white : colors.primary} 
+                />
+                <Text style={[styles.locationChipText, newItemLocation === loc && styles.locationChipTextActive]}>
+                  {loc}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          
           <Pressable style={styles.addBtn} onPress={handleAddItem}>
             <Text style={styles.addBtnText}>Add to List</Text>
           </Pressable>
@@ -430,6 +485,31 @@ export default function ShoppingListScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Location selector in edit modal */}
+            <Text style={styles.unitLabel}>Store in location</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.modalLocationSelector}
+            >
+              {locations.map((loc) => (
+                <TouchableOpacity
+                  key={loc}
+                  style={[styles.modalLocationBtn, editLocation === loc && styles.modalLocationBtnActive]}
+                  onPress={() => setEditLocation(loc)}
+                >
+                  <Ionicons 
+                    name={editLocation === loc ? 'location' : 'location-outline'} 
+                    size={14} 
+                    color={editLocation === loc ? colors.white : colors.primary} 
+                  />
+                  <Text style={[styles.modalLocationText, editLocation === loc && styles.modalLocationTextActive]}>
+                    {loc}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -821,5 +901,87 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.white,
     fontWeight: '600',
+  },
+  // Location picker styles for Add Form
+  locationLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    color: colors.textSecondary,
+  },
+  locationScroll: {
+    marginBottom: spacing.sm,
+  },
+  locationScrollContent: {
+    paddingRight: spacing.md,
+  },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.background,
+    marginRight: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  locationChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  locationChipText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginLeft: spacing.xs,
+  },
+  locationChipTextActive: {
+    color: colors.white,
+  },
+  // Item location badge styles
+  itemLocationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    backgroundColor: colors.primaryLight + '30',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+    alignSelf: 'flex-start',
+  },
+  itemLocationText: {
+    ...typography.caption,
+    color: colors.primary,
+    marginLeft: 4,
+    fontSize: 11,
+  },
+  // Modal location selector styles
+  modalLocationSelector: {
+    flexDirection: 'row',
+    paddingVertical: spacing.xs,
+  },
+  modalLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    marginRight: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalLocationBtnActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  modalLocationText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginLeft: spacing.xs,
+  },
+  modalLocationTextActive: {
+    color: colors.white,
   },
 });

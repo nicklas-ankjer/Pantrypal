@@ -103,12 +103,14 @@ class ShoppingListItemCreate(BaseModel):
     name: str
     quantity: float
     unit: str
+    location: str = "Uncategorized"
 
 class ShoppingListItemUpdate(BaseModel):
     name: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
     checked: Optional[bool] = None
+    location: Optional[str] = None
 
 class ShoppingListItemResponse(BaseModel):
     id: str
@@ -116,6 +118,7 @@ class ShoppingListItemResponse(BaseModel):
     quantity: float
     unit: str
     checked: bool
+    location: str = "Uncategorized"
     created_at: datetime
     updated_at: datetime
 
@@ -539,7 +542,14 @@ async def what_can_i_cook():
 @api_router.get("/shopping-list", response_model=List[ShoppingListItemResponse])
 async def get_shopping_list():
     items = await db.shopping_list.find().to_list(1000)
-    return [ShoppingListItemResponse(**serialize_doc(item)) for item in items]
+    result = []
+    for item in items:
+        doc = serialize_doc(item)
+        # Add default location for items that don't have it
+        if 'location' not in doc:
+            doc['location'] = 'Uncategorized'
+        result.append(ShoppingListItemResponse(**doc))
+    return result
 
 @api_router.post("/shopping-list", response_model=ShoppingListItemResponse)
 async def create_shopping_list_item(item: ShoppingListItemCreate):
@@ -580,22 +590,28 @@ async def move_checked_to_stock():
     
     moved_count = 0
     for item in checked_items:
-        # Check if item exists in home stock
-        existing = await db.home_stock.find_one({"name": {"$regex": f"^{item['name']}$", "$options": "i"}})
+        item_location = item.get('location', 'Uncategorized')
+        
+        # Check if item exists in home stock with same name AND location
+        existing = await db.home_stock.find_one({
+            "name": {"$regex": f"^{item['name']}$", "$options": "i"},
+            "location": item_location
+        })
         
         if existing:
-            # Update existing item
+            # Update existing item quantity
             await db.home_stock.update_one(
                 {"_id": existing['_id']},
                 {"$inc": {"quantity": item['quantity']}, "$set": {"updated_at": datetime.utcnow()}}
             )
         else:
-            # Create new item
+            # Create new item in the specified location
             new_item = {
                 "name": item['name'],
                 "quantity": item['quantity'],
                 "unit": item['unit'],
                 "safety_stock": 0,
+                "location": item_location,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }

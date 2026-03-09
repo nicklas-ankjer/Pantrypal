@@ -39,6 +39,7 @@ export interface ShoppingListItem {
   quantity: number;
   unit: string;
   checked: boolean;
+  location?: string;
   created_at: string;
   updated_at: string;
 }

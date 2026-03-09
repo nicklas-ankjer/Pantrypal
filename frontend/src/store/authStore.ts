@@ -1,30 +1,7 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
 import axios from 'axios';
-import { Platform } from 'react-native';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
-// Simple storage that works on both web and native
-const storage = {
-  getItem: async (name: string) => {
-    if (Platform.OS === 'web') {
-      return localStorage.getItem(name);
-    }
-    // For native, we'll handle differently
-    return null;
-  },
-  setItem: async (name: string, value: string) => {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(name, value);
-    }
-  },
-  removeItem: async (name: string) => {
-    if (Platform.OS === 'web') {
-      localStorage.removeItem(name);
-    }
-  },
-};
 
 export interface User {
   id: string;
@@ -71,10 +48,8 @@ interface AuthState {
   getHouseholdId: () => string | null;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      user: null,
+export const useAuthStore = create<AuthState>()((set, get) => ({
+  user: null,
   household: null,
   isAuthenticated: false,
   loading: false,
@@ -237,15 +212,4 @@ export const useAuthStore = create<AuthState>()(
     const { user } = get();
     return user?.household_id || null;
   },
-}),
-    {
-      name: 'kitchen-counter-auth',
-      storage: createJSONStorage(() => storage),
-      partialize: (state) => ({
-        user: state.user,
-        household: state.household,
-        isAuthenticated: state.isAuthenticated,
-      }),
-    }
-  )
-);
+}));

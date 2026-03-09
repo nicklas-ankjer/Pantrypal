@@ -8,13 +8,36 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, typography } from '../src/components/theme';
 import { useAuthStore } from '../src/store/authStore';
-import { notificationService } from '../src/services/notificationService';
+import axios from 'axios';
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// Simple API functions for notification settings (without expo-notifications dependency)
+const notificationApi = {
+  async getSettings(userId: string) {
+    try {
+      const response = await axios.get(`${API_BASE}/api/notification-settings/${userId}`);
+      return response.data;
+    } catch (error) {
+      return { emergency_alerts_enabled: true };
+    }
+  },
+  
+  async updateSettings(userId: string, settings: { emergency_alerts_enabled: boolean }) {
+    await axios.put(`${API_BASE}/api/notification-settings/${userId}`, settings);
+  },
+  
+  async sendTestNotification(userId: string) {
+    await axios.post(`${API_BASE}/api/notifications/test/${userId}`);
+  }
+};
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -37,7 +60,7 @@ export default function SettingsScreen() {
     }
     
     try {
-      const settings = await notificationService.getSettings(user.id);
+      const settings = await notificationApi.getSettings(user.id);
       setEmergencyAlerts(settings.emergency_alerts_enabled);
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -57,14 +80,9 @@ export default function SettingsScreen() {
     setSaving(true);
     
     try {
-      await notificationService.updateSettings(user.id, {
+      await notificationApi.updateSettings(user.id, {
         emergency_alerts_enabled: value,
       });
-      
-      if (value) {
-        // Re-register for push notifications when enabling
-        await notificationService.registerForPushNotifications(user.id);
-      }
     } catch (error) {
       // Revert on error
       setEmergencyAlerts(!value);
@@ -84,24 +102,11 @@ export default function SettingsScreen() {
     setTestingNotification(true);
     
     try {
-      // First ensure we have a push token registered
-      const token = await notificationService.registerForPushNotifications(user.id);
-      
-      if (!token) {
-        Alert.alert(
-          'Notification Permission Required',
-          'Please allow notifications in your device settings to receive alerts.'
-        );
-        return;
-      }
-
-      const success = await notificationService.sendTestNotification(user.id);
-      
-      if (success) {
-        Alert.alert('Success', 'Test notification sent! You should receive it shortly.');
-      } else {
-        Alert.alert('Error', 'Failed to send test notification');
-      }
+      await notificationApi.sendTestNotification(user.id);
+      Alert.alert(
+        'Note', 
+        'Push notifications require a development build (not Expo Go). The notification was sent to the server but may not appear on this device.'
+      );
     } catch (error) {
       Alert.alert('Error', 'Failed to send test notification');
     } finally {
@@ -119,9 +124,6 @@ export default function SettingsScreen() {
           text: 'Sign Out', 
           style: 'destructive',
           onPress: async () => {
-            if (user) {
-              await notificationService.unregisterPushToken(user.id);
-            }
             logout();
             router.replace('/auth');
           }

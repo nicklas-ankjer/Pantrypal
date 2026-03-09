@@ -15,6 +15,20 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
+          name="auth"
+          options={{
+            presentation: 'card',
+            animation: 'fade',
+          }}
+        />
+        <Stack.Screen
+          name="household"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
           name="shopping-list"
           options={{
             presentation: 'modal',

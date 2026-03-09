@@ -135,11 +135,325 @@ class QuickAddRequest(BaseModel):
     item_id: str
     quantity_change: float  # positive or negative
 
+# ==================== USER & HOUSEHOLD MODELS ====================
+
+import secrets
+import hashlib
+
+def generate_invite_code():
+    """Generate a unique 8-character invite code"""
+    return secrets.token_urlsafe(6)[:8].upper()
+
+def hash_pin(pin: str) -> str:
+    """Simple hash for PIN storage"""
+    return hashlib.sha256(pin.encode()).hexdigest()
+
+class UserRegister(BaseModel):
+    username: str
+    pin: str  # 4-digit PIN
+
+class UserLogin(BaseModel):
+    username: str
+    pin: str
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    household_id: Optional[str] = None
+    created_at: datetime
+
+class HouseholdCreate(BaseModel):
+    name: str
+
+class HouseholdJoin(BaseModel):
+    invite_code: str
+
+class HouseholdResponse(BaseModel):
+    id: str
+    name: str
+    invite_code: str
+    members: List[dict]
+    created_at: datetime
+
+class HouseholdMember(BaseModel):
+    user_id: str
+    username: str
+    joined_at: datetime
+
+# ==================== AUTH ENDPOINTS ====================
+
+@api_router.post("/auth/register")
+async def register_user(user: UserRegister):
+    """Register a new user with username and 4-digit PIN"""
+    if len(user.pin) != 4 or not user.pin.isdigit():
+        raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
+    
+    if len(user.username) < 2:
+        raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
+    
+    # Check if username exists
+    existing = await db.users.find_one({"username": user.username.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    now = datetime.utcnow()
+    user_doc = {
+        "username": user.username,
+        "username_lower": user.username.lower(),
+        "pin_hash": hash_pin(user.pin),
+        "household_id": None,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    result = await db.users.insert_one(user_doc)
+    user_doc['_id'] = result.inserted_id
+    
+    return {
+        "id": str(result.inserted_id),
+        "username": user.username,
+        "household_id": None,
+        "created_at": now
+    }
+
+@api_router.post("/auth/login")
+async def login_user(user: UserLogin):
+    """Login with username and PIN"""
+    db_user = await db.users.find_one({"username_lower": user.username.lower()})
+    if not db_user:
+        raise HTTPException(status_code=401, detail="Invalid username or PIN")
+    
+    if db_user['pin_hash'] != hash_pin(user.pin):
+        raise HTTPException(status_code=401, detail="Invalid username or PIN")
+    
+    return {
+        "id": str(db_user['_id']),
+        "username": db_user['username'],
+        "household_id": db_user.get('household_id'),
+        "created_at": db_user['created_at']
+    }
+
+@api_router.get("/auth/user/{user_id}")
+async def get_user(user_id: str):
+    """Get user info by ID"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "id": str(user['_id']),
+        "username": user['username'],
+        "household_id": user.get('household_id'),
+        "created_at": user['created_at']
+    }
+
+# ==================== HOUSEHOLD ENDPOINTS ====================
+
+@api_router.post("/household/create")
+async def create_household(data: HouseholdCreate, user_id: str):
+    """Create a new household and add the creator as first member"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get('household_id'):
+        raise HTTPException(status_code=400, detail="User already belongs to a household")
+    
+    now = datetime.utcnow()
+    invite_code = generate_invite_code()
+    
+    # Check invite code uniqueness
+    while await db.households.find_one({"invite_code": invite_code}):
+        invite_code = generate_invite_code()
+    
+    household_doc = {
+        "name": data.name,
+        "invite_code": invite_code,
+        "members": [{
+            "user_id": str(user['_id']),
+            "username": user['username'],
+            "joined_at": now,
+            "is_owner": True
+        }],
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    result = await db.households.insert_one(household_doc)
+    household_id = str(result.inserted_id)
+    
+    # Update user with household_id
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Migrate user's existing data to the household
+    await migrate_data_to_household(user_id, household_id)
+    
+    return {
+        "id": household_id,
+        "name": data.name,
+        "invite_code": invite_code,
+        "members": household_doc['members'],
+        "created_at": now
+    }
+
+@api_router.post("/household/join")
+async def join_household(data: HouseholdJoin, user_id: str):
+    """Join an existing household using invite code"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get('household_id'):
+        raise HTTPException(status_code=400, detail="User already belongs to a household. Leave first to join another.")
+    
+    household = await db.households.find_one({"invite_code": data.invite_code.upper()})
+    if not household:
+        raise HTTPException(status_code=404, detail="Invalid invite code")
+    
+    now = datetime.utcnow()
+    household_id = str(household['_id'])
+    
+    # Add user to household members
+    new_member = {
+        "user_id": str(user['_id']),
+        "username": user['username'],
+        "joined_at": now,
+        "is_owner": False
+    }
+    
+    await db.households.update_one(
+        {"_id": household['_id']},
+        {
+            "$push": {"members": new_member},
+            "$set": {"updated_at": now}
+        }
+    )
+    
+    # Update user with household_id
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Migrate user's existing data to the household (merge)
+    await migrate_data_to_household(user_id, household_id)
+    
+    # Fetch updated household
+    updated_household = await db.households.find_one({"_id": household['_id']})
+    
+    return {
+        "id": household_id,
+        "name": updated_household['name'],
+        "invite_code": updated_household['invite_code'],
+        "members": updated_household['members'],
+        "created_at": updated_household['created_at']
+    }
+
+@api_router.get("/household/{user_id}")
+async def get_household(user_id: str):
+    """Get household info for a user"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.get('household_id'):
+        return {"household": None}
+    
+    household = await db.households.find_one({"_id": ObjectId(user['household_id'])})
+    if not household:
+        return {"household": None}
+    
+    return {
+        "id": str(household['_id']),
+        "name": household['name'],
+        "invite_code": household['invite_code'],
+        "members": household['members'],
+        "created_at": household['created_at']
+    }
+
+@api_router.post("/household/leave/{user_id}")
+async def leave_household(user_id: str):
+    """Leave the current household"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.get('household_id'):
+        raise HTTPException(status_code=400, detail="User is not in a household")
+    
+    household = await db.households.find_one({"_id": ObjectId(user['household_id'])})
+    if not household:
+        raise HTTPException(status_code=404, detail="Household not found")
+    
+    now = datetime.utcnow()
+    
+    # Remove user from household members
+    await db.households.update_one(
+        {"_id": household['_id']},
+        {
+            "$pull": {"members": {"user_id": user_id}},
+            "$set": {"updated_at": now}
+        }
+    )
+    
+    # Update user to remove household_id
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"household_id": None, "updated_at": now}}
+    )
+    
+    # Check if household is now empty, delete it
+    updated_household = await db.households.find_one({"_id": household['_id']})
+    if updated_household and len(updated_household.get('members', [])) == 0:
+        await db.households.delete_one({"_id": household['_id']})
+    
+    return {"message": "Successfully left household"}
+
+async def migrate_data_to_household(user_id: str, household_id: str):
+    """Migrate a user's existing data to a household (for sharing)"""
+    now = datetime.utcnow()
+    
+    # Update all home_stock items that don't have a household_id yet
+    await db.home_stock.update_many(
+        {"household_id": {"$exists": False}},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Update all emergency_stock items
+    await db.emergency_stock.update_many(
+        {"household_id": {"$exists": False}},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Update all recipes
+    await db.recipes.update_many(
+        {"household_id": {"$exists": False}},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Update all shopping_list items
+    await db.shopping_list.update_many(
+        {"household_id": {"$exists": False}},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+    
+    # Update locations
+    await db.locations.update_many(
+        {"household_id": {"$exists": False}},
+        {"$set": {"household_id": household_id, "updated_at": now}}
+    )
+
 # ==================== HOME STOCK ENDPOINTS ====================
 
 @api_router.get("/home-stock", response_model=List[HomeStockItemResponse])
-async def get_home_stock():
-    items = await db.home_stock.find().to_list(1000)
+async def get_home_stock(household_id: Optional[str] = None):
+    query = {}
+    if household_id:
+        query["household_id"] = household_id
+    items = await db.home_stock.find(query).to_list(1000)
     result = []
     for item in items:
         doc = serialize_doc(item)
@@ -150,11 +464,13 @@ async def get_home_stock():
     return result
 
 @api_router.post("/home-stock", response_model=HomeStockItemResponse)
-async def create_home_stock_item(item: HomeStockItemCreate):
+async def create_home_stock_item(item: HomeStockItemCreate, household_id: Optional[str] = None):
     now = datetime.utcnow()
     item_dict = item.dict()
     item_dict['created_at'] = now
     item_dict['updated_at'] = now
+    if household_id:
+        item_dict['household_id'] = household_id
     result = await db.home_stock.insert_one(item_dict)
     created = await db.home_stock.find_one({"_id": result.inserted_id})
     return HomeStockItemResponse(**serialize_doc(created))
@@ -294,16 +610,21 @@ async def delete_location(name: str):
 # ==================== EMERGENCY STOCK ENDPOINTS ====================
 
 @api_router.get("/emergency-stock", response_model=List[EmergencyStockItemResponse])
-async def get_emergency_stock():
-    items = await db.emergency_stock.find().sort("expiration_date", 1).to_list(1000)
+async def get_emergency_stock(household_id: Optional[str] = None):
+    query = {}
+    if household_id:
+        query["household_id"] = household_id
+    items = await db.emergency_stock.find(query).sort("expiration_date", 1).to_list(1000)
     return [EmergencyStockItemResponse(**serialize_doc(item)) for item in items]
 
 @api_router.post("/emergency-stock", response_model=EmergencyStockItemResponse)
-async def create_emergency_stock_item(item: EmergencyStockItemCreate):
+async def create_emergency_stock_item(item: EmergencyStockItemCreate, household_id: Optional[str] = None):
     now = datetime.utcnow()
     item_dict = item.dict()
     item_dict['created_at'] = now
     item_dict['updated_at'] = now
+    if household_id:
+        item_dict['household_id'] = household_id
     result = await db.emergency_stock.insert_one(item_dict)
     created = await db.emergency_stock.find_one({"_id": result.inserted_id})
     return EmergencyStockItemResponse(**serialize_doc(created))
@@ -337,16 +658,21 @@ async def delete_emergency_stock_item(item_id: str):
 # ==================== RECIPE ENDPOINTS ====================
 
 @api_router.get("/recipes", response_model=List[RecipeResponse])
-async def get_recipes():
-    recipes = await db.recipes.find().to_list(1000)
+async def get_recipes(household_id: Optional[str] = None):
+    query = {}
+    if household_id:
+        query["household_id"] = household_id
+    recipes = await db.recipes.find(query).to_list(1000)
     return [RecipeResponse(**serialize_doc(recipe)) for recipe in recipes]
 
 @api_router.post("/recipes", response_model=RecipeResponse)
-async def create_recipe(recipe: RecipeCreate):
+async def create_recipe(recipe: RecipeCreate, household_id: Optional[str] = None):
     now = datetime.utcnow()
     recipe_dict = recipe.dict()
     recipe_dict['created_at'] = now
     recipe_dict['updated_at'] = now
+    if household_id:
+        recipe_dict['household_id'] = household_id
     result = await db.recipes.insert_one(recipe_dict)
     created = await db.recipes.find_one({"_id": result.inserted_id})
     return RecipeResponse(**serialize_doc(created))
@@ -628,8 +954,11 @@ async def what_can_i_cook():
 # ==================== SHOPPING LIST ENDPOINTS ====================
 
 @api_router.get("/shopping-list", response_model=List[ShoppingListItemResponse])
-async def get_shopping_list():
-    items = await db.shopping_list.find().to_list(1000)
+async def get_shopping_list(household_id: Optional[str] = None):
+    query = {}
+    if household_id:
+        query["household_id"] = household_id
+    items = await db.shopping_list.find(query).to_list(1000)
     result = []
     for item in items:
         doc = serialize_doc(item)
@@ -640,12 +969,14 @@ async def get_shopping_list():
     return result
 
 @api_router.post("/shopping-list", response_model=ShoppingListItemResponse)
-async def create_shopping_list_item(item: ShoppingListItemCreate):
+async def create_shopping_list_item(item: ShoppingListItemCreate, household_id: Optional[str] = None):
     now = datetime.utcnow()
     item_dict = item.dict()
     item_dict['checked'] = False
     item_dict['created_at'] = now
     item_dict['updated_at'] = now
+    if household_id:
+        item_dict['household_id'] = household_id
     result = await db.shopping_list.insert_one(item_dict)
     created = await db.shopping_list.find_one({"_id": result.inserted_id})
     return ShoppingListItemResponse(**serialize_doc(created))

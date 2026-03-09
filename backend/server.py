@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,8 +7,10 @@ import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson import ObjectId
+import httpx
+import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -17,6 +19,9 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Expo Push Notification URL
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -167,6 +172,182 @@ class HouseholdCreate(BaseModel):
 
 class HouseholdJoin(BaseModel):
     invite_code: str
+
+# ==================== PUSH NOTIFICATION MODELS ====================
+
+class PushTokenRegister(BaseModel):
+    user_id: str
+    push_token: str
+
+class NotificationSettings(BaseModel):
+    emergency_alerts_enabled: bool = True
+
+async def send_push_notification(push_token: str, title: str, body: str, data: dict = None):
+    """Send a push notification via Expo's push service"""
+    message = {
+        "to": push_token,
+        "sound": "default",
+        "title": title,
+        "body": body,
+        "data": data or {}
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                EXPO_PUSH_URL,
+                json=message,
+                headers={"Content-Type": "application/json"}
+            )
+            return response.json()
+    except Exception as e:
+        logging.error(f"Failed to send push notification: {e}")
+        return None
+
+async def check_and_send_expiration_alerts():
+    """Check emergency stock for expiring items and send notifications"""
+    today = datetime.utcnow().date()
+    alert_days = [30, 14, 7]
+    
+    # Get all emergency stock items
+    items = await db.emergency_stock.find().to_list(1000)
+    
+    for item in items:
+        if 'expiration_date' not in item:
+            continue
+            
+        exp_date = item['expiration_date']
+        if isinstance(exp_date, str):
+            exp_date = datetime.fromisoformat(exp_date.replace('Z', '+00:00')).date()
+        elif isinstance(exp_date, datetime):
+            exp_date = exp_date.date()
+        
+        days_left = (exp_date - today).days
+        
+        # Check if days_left matches any alert threshold
+        if days_left in alert_days:
+            # Get household_id for this item (if exists)
+            household_id = item.get('household_id')
+            
+            # Find all users in this household (or all users if no household)
+            if household_id:
+                users = await db.users.find({"household_id": household_id}).to_list(100)
+            else:
+                # If item has no household, skip notifications
+                continue
+            
+            # Get emoji based on urgency
+            if days_left == 7:
+                emoji = "🚨"
+            elif days_left == 14:
+                emoji = "⚠️"
+            else:
+                emoji = "📅"
+            
+            # Send notification to each user with a push token
+            for user in users:
+                # Check if user has notifications enabled
+                settings = await db.notification_settings.find_one({"user_id": str(user['_id'])})
+                if settings and not settings.get('emergency_alerts_enabled', True):
+                    continue
+                
+                # Get push token
+                token_doc = await db.push_tokens.find_one({"user_id": str(user['_id'])})
+                if not token_doc:
+                    continue
+                
+                title = f"{emoji} Emergency Stock Alert"
+                body = f'"{item["name"]}" - from Emergency expires in {days_left} days!'
+                
+                await send_push_notification(
+                    token_doc['push_token'],
+                    title,
+                    body,
+                    {"item_id": str(item['_id']), "days_left": days_left}
+                )
+                
+                logging.info(f"Sent expiration alert for {item['name']} to user {user['username']}")
+
+# ==================== PUSH NOTIFICATION ENDPOINTS ====================
+
+@api_router.post("/push-token/register")
+async def register_push_token(data: PushTokenRegister):
+    """Register or update a user's push token"""
+    now = datetime.utcnow()
+    
+    # Upsert the push token
+    await db.push_tokens.update_one(
+        {"user_id": data.user_id},
+        {
+            "$set": {
+                "push_token": data.push_token,
+                "updated_at": now
+            },
+            "$setOnInsert": {
+                "created_at": now
+            }
+        },
+        upsert=True
+    )
+    
+    return {"message": "Push token registered successfully"}
+
+@api_router.delete("/push-token/{user_id}")
+async def delete_push_token(user_id: str):
+    """Remove a user's push token (for logout)"""
+    await db.push_tokens.delete_one({"user_id": user_id})
+    return {"message": "Push token removed"}
+
+@api_router.get("/notification-settings/{user_id}")
+async def get_notification_settings(user_id: str):
+    """Get notification settings for a user"""
+    settings = await db.notification_settings.find_one({"user_id": user_id})
+    if not settings:
+        return {"emergency_alerts_enabled": True}
+    return {"emergency_alerts_enabled": settings.get('emergency_alerts_enabled', True)}
+
+@api_router.put("/notification-settings/{user_id}")
+async def update_notification_settings(user_id: str, settings: NotificationSettings):
+    """Update notification settings for a user"""
+    now = datetime.utcnow()
+    
+    await db.notification_settings.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "emergency_alerts_enabled": settings.emergency_alerts_enabled,
+                "updated_at": now
+            },
+            "$setOnInsert": {
+                "created_at": now
+            }
+        },
+        upsert=True
+    )
+    
+    return {"message": "Settings updated", "emergency_alerts_enabled": settings.emergency_alerts_enabled}
+
+@api_router.post("/notifications/check-expirations")
+async def trigger_expiration_check(background_tasks: BackgroundTasks):
+    """Manually trigger expiration check (for testing or cron jobs)"""
+    background_tasks.add_task(check_and_send_expiration_alerts)
+    return {"message": "Expiration check started"}
+
+@api_router.post("/notifications/test/{user_id}")
+async def send_test_notification(user_id: str):
+    """Send a test notification to verify push setup"""
+    token_doc = await db.push_tokens.find_one({"user_id": user_id})
+    if not token_doc:
+        raise HTTPException(status_code=404, detail="No push token registered for this user")
+    
+    result = await send_push_notification(
+        token_doc['push_token'],
+        "🧪 Test Notification",
+        "Push notifications are working!",
+        {"test": True}
+    )
+    
+    return {"message": "Test notification sent", "result": result}
 
 class HouseholdResponse(BaseModel):
     id: str

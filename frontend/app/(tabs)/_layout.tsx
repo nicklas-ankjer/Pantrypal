@@ -68,6 +68,14 @@ export default function TabLayout() {
                 )}
               </View>
             </TouchableOpacity>
+
+            {/* Settings Button */}
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => router.push('/settings')}
+            >
+              <Ionicons name="settings-outline" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
         ),
       }}

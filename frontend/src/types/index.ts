@@ -44,6 +44,13 @@ export interface ShoppingListItem {
   updated_at: string;
 }
 
+export interface IngredientLocationInfo {
+  location: string;
+  item_id: string;
+  quantity: number;
+  safety_stock: number;
+}
+
 export interface IngredientAvailability {
   ingredient: string;
   required: number;
@@ -52,6 +59,7 @@ export interface IngredientAvailability {
   safety_stock: number;
   status: 'available' | 'below_safety' | 'missing' | 'insufficient';
   in_emergency_stock: boolean;
+  locations?: IngredientLocationInfo[];  // NEW: list of locations with quantities
 }
 
 export interface DashboardData {

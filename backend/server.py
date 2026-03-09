@@ -122,9 +122,14 @@ class ShoppingListItemResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class IngredientLocationChoice(BaseModel):
+    ingredient_name: str
+    item_id: str  # The specific home_stock item ID to use
+
 class CookRecipeRequest(BaseModel):
     recipe_id: str
     use_emergency_stock: bool = False
+    location_choices: Optional[List[IngredientLocationChoice]] = None  # NEW: specific location choices
 
 class QuickAddRequest(BaseModel):
     item_id: str
@@ -383,25 +388,41 @@ async def check_recipe_availability(recipe_id: str):
     home_stock = await db.home_stock.find().to_list(1000)
     emergency_stock = await db.emergency_stock.find().to_list(1000)
     
-    home_stock_map = {item['name'].lower(): item for item in home_stock}
+    # Group home stock items by name (case insensitive) - keep ALL items, not just one
+    home_stock_by_name = {}
+    for item in home_stock:
+        name_lower = item['name'].lower()
+        if name_lower not in home_stock_by_name:
+            home_stock_by_name[name_lower] = []
+        home_stock_by_name[name_lower].append(item)
+    
     emergency_stock_map = {item['name'].lower(): item for item in emergency_stock}
     
     availability = []
     for ingredient in recipe['ingredients']:
         ing_name = ingredient['name'].lower()
-        home_item = home_stock_map.get(ing_name)
+        home_items = home_stock_by_name.get(ing_name, [])
         emergency_item = emergency_stock_map.get(ing_name)
         
         status = "missing"
-        available_qty = 0
-        safety_stock = 0
+        total_available = sum(item['quantity'] for item in home_items)
+        safety_stock = home_items[0].get('safety_stock', 0) if home_items else 0
         in_emergency = False
         
-        if home_item:
-            available_qty = home_item['quantity']
-            safety_stock = home_item.get('safety_stock', 0)
-            if available_qty >= ingredient['quantity']:
-                if available_qty - ingredient['quantity'] < safety_stock:
+        # Build locations array with availability info
+        locations = []
+        for item in home_items:
+            loc = item.get('location', 'Uncategorized')
+            locations.append({
+                "location": loc,
+                "item_id": str(item['_id']),
+                "quantity": item['quantity'],
+                "safety_stock": item.get('safety_stock', 0)
+            })
+        
+        if total_available > 0:
+            if total_available >= ingredient['quantity']:
+                if total_available - ingredient['quantity'] < safety_stock:
                     status = "below_safety"
                 else:
                     status = "available"
@@ -415,10 +436,11 @@ async def check_recipe_availability(recipe_id: str):
             "ingredient": ingredient['name'],
             "required": ingredient['quantity'],
             "unit": ingredient['unit'],
-            "available": available_qty,
+            "available": total_available,
             "safety_stock": safety_stock,
             "status": status,
-            "in_emergency_stock": in_emergency
+            "in_emergency_stock": in_emergency,
+            "locations": locations  # NEW: array of locations with quantities
         })
     
     return {
@@ -437,8 +459,24 @@ async def cook_recipe(recipe_id: str, request: CookRecipeRequest):
     home_stock = await db.home_stock.find().to_list(1000)
     emergency_stock = await db.emergency_stock.find().to_list(1000)
     
-    home_stock_map = {item['name'].lower(): item for item in home_stock}
+    # Build a map of item_id -> item for quick lookup
+    home_stock_by_id = {str(item['_id']): item for item in home_stock}
+    
+    # Group home stock by name
+    home_stock_by_name = {}
+    for item in home_stock:
+        name_lower = item['name'].lower()
+        if name_lower not in home_stock_by_name:
+            home_stock_by_name[name_lower] = []
+        home_stock_by_name[name_lower].append(item)
+    
     emergency_stock_map = {item['name'].lower(): item for item in emergency_stock}
+    
+    # Build location choices map if provided
+    location_choices_map = {}
+    if request.location_choices:
+        for choice in request.location_choices:
+            location_choices_map[choice.ingredient_name.lower()] = choice.item_id
     
     missing_ingredients = []
     deductions = []
@@ -446,14 +484,65 @@ async def cook_recipe(recipe_id: str, request: CookRecipeRequest):
     for ingredient in recipe['ingredients']:
         ing_name = ingredient['name'].lower()
         required = ingredient['quantity']
-        home_item = home_stock_map.get(ing_name)
+        home_items = home_stock_by_name.get(ing_name, [])
         
-        if home_item and home_item['quantity'] >= required:
-            deductions.append({
-                "item_id": home_item['_id'],
-                "new_quantity": home_item['quantity'] - required,
-                "source": "home"
-            })
+        # Check if user specified a location choice for this ingredient
+        chosen_item_id = location_choices_map.get(ing_name)
+        
+        if chosen_item_id and chosen_item_id in home_stock_by_id:
+            # Use the specifically chosen item
+            chosen_item = home_stock_by_id[chosen_item_id]
+            if chosen_item['quantity'] >= required:
+                deductions.append({
+                    "item_id": chosen_item['_id'],
+                    "new_quantity": chosen_item['quantity'] - required,
+                    "source": "home"
+                })
+            else:
+                missing_ingredients.append({
+                    "name": ingredient['name'],
+                    "required": required,
+                    "available": chosen_item['quantity'],
+                    "unit": ingredient['unit']
+                })
+        elif home_items:
+            # Find the first item with enough quantity (default behavior)
+            found = False
+            for home_item in home_items:
+                if home_item['quantity'] >= required:
+                    deductions.append({
+                        "item_id": home_item['_id'],
+                        "new_quantity": home_item['quantity'] - required,
+                        "source": "home"
+                    })
+                    found = True
+                    break
+            
+            if not found:
+                # Sum up total available
+                total_available = sum(item['quantity'] for item in home_items)
+                if request.use_emergency_stock and emergency_stock_map.get(ing_name):
+                    emergency_item = emergency_stock_map[ing_name]
+                    if emergency_item['quantity'] >= required:
+                        deductions.append({
+                            "item_id": emergency_item['_id'],
+                            "new_quantity": emergency_item['quantity'] - required,
+                            "source": "emergency"
+                        })
+                    else:
+                        missing_ingredients.append({
+                            "name": ingredient['name'],
+                            "required": required,
+                            "available": emergency_item['quantity'],
+                            "unit": ingredient['unit']
+                        })
+                else:
+                    missing_ingredients.append({
+                        "name": ingredient['name'],
+                        "required": required,
+                        "available": total_available,
+                        "unit": ingredient['unit']
+                    })
         elif request.use_emergency_stock and emergency_stock_map.get(ing_name):
             emergency_item = emergency_stock_map[ing_name]
             if emergency_item['quantity'] >= required:
@@ -470,11 +559,10 @@ async def cook_recipe(recipe_id: str, request: CookRecipeRequest):
                     "unit": ingredient['unit']
                 })
         else:
-            available = home_item['quantity'] if home_item else 0
             missing_ingredients.append({
                 "name": ingredient['name'],
                 "required": required,
-                "available": available,
+                "available": 0,
                 "unit": ingredient['unit']
             })
     

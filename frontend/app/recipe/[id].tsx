@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +16,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../../src/components/theme';
 import { recipesApi, shoppingListApi } from '../../src/api/client';
 import { useAppStore } from '../../src/store/appStore';
-import { IngredientAvailability } from '../../src/types';
+import { IngredientAvailability, IngredientLocationInfo } from '../../src/types';
+
+interface LocationChoice {
+  ingredient_name: string;
+  item_id: string;
+}
 
 export default function RecipeDetailScreen() {
   const router = useRouter();
@@ -28,6 +35,11 @@ export default function RecipeDetailScreen() {
   const [canCook, setCanCook] = useState(false);
   const [loading, setLoading] = useState(true);
   const [cooking, setCooking] = useState(false);
+  
+  // Location selection state
+  const [locationChoices, setLocationChoices] = useState<Record<string, string>>({});
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [selectedIngredient, setSelectedIngredient] = useState<IngredientAvailability | null>(null);
 
   useEffect(() => {
     loadRecipe();
@@ -44,6 +56,25 @@ export default function RecipeDetailScreen() {
       setRecipe(recipeRes.data);
       setAvailability(availRes.data.ingredients);
       setCanCook(availRes.data.can_cook);
+      
+      // Initialize location choices with first available location for each ingredient
+      const initialChoices: Record<string, string> = {};
+      for (const ing of availRes.data.ingredients) {
+        if (ing.locations && ing.locations.length > 0) {
+          // Find the first location with enough quantity, or the one with most quantity
+          const locWithEnough = ing.locations.find((loc: IngredientLocationInfo) => loc.quantity >= ing.required);
+          if (locWithEnough) {
+            initialChoices[ing.ingredient] = locWithEnough.item_id;
+          } else {
+            // Pick the one with highest quantity
+            const sorted = [...ing.locations].sort((a: IngredientLocationInfo, b: IngredientLocationInfo) => b.quantity - a.quantity);
+            if (sorted.length > 0) {
+              initialChoices[ing.ingredient] = sorted[0].item_id;
+            }
+          }
+        }
+      }
+      setLocationChoices(initialChoices);
     } catch (error) {
       console.error('Failed to load recipe:', error);
       Alert.alert('Error', 'Failed to load recipe');
@@ -103,7 +134,13 @@ export default function RecipeDetailScreen() {
   const performCook = async () => {
     setCooking(true);
     try {
-      const result = await recipesApi.cook(id!, false);
+      // Build location choices array from state
+      const choices: LocationChoice[] = Object.entries(locationChoices).map(([ingredient_name, item_id]) => ({
+        ingredient_name,
+        item_id,
+      }));
+      
+      const result = await recipesApi.cook(id!, false, choices);
       if (result.data.success) {
         Alert.alert('Success', `Enjoy your ${recipe?.name}!`);
         await fetchHomeStock();
@@ -116,6 +153,34 @@ export default function RecipeDetailScreen() {
     } finally {
       setCooking(false);
     }
+  };
+  
+  // Handler for opening location selection modal
+  const handleIngredientPress = (ing: IngredientAvailability) => {
+    if (ing.locations && ing.locations.length > 1) {
+      setSelectedIngredient(ing);
+      setShowLocationModal(true);
+    }
+  };
+  
+  // Handler for selecting a location
+  const handleSelectLocation = (ing: IngredientAvailability, itemId: string) => {
+    setLocationChoices(prev => ({
+      ...prev,
+      [ing.ingredient]: itemId
+    }));
+    setShowLocationModal(false);
+    setSelectedIngredient(null);
+  };
+  
+  // Get the currently selected location info for an ingredient
+  const getSelectedLocation = (ing: IngredientAvailability): IngredientLocationInfo | undefined => {
+    if (!ing.locations || ing.locations.length === 0) return undefined;
+    const chosenId = locationChoices[ing.ingredient];
+    if (chosenId) {
+      return ing.locations.find(loc => loc.item_id === chosenId);
+    }
+    return ing.locations[0];
   };
 
   const getStatusColor = (status: string) => {
@@ -200,35 +265,68 @@ export default function RecipeDetailScreen() {
         {/* Ingredients */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Ingredients</Text>
-          {availability.map((ing, index) => (
-            <View key={index} style={styles.ingredientCard}>
-              <View style={styles.ingredientLeft}>
-                <Ionicons
-                  name={getStatusIcon(ing.status) as any}
-                  size={20}
-                  color={getStatusColor(ing.status)}
-                />
-                <View style={styles.ingredientInfo}>
-                  <Text style={styles.ingredientName}>{ing.ingredient}</Text>
-                  <Text style={styles.ingredientQty}>
-                    Need: {ing.required} {ing.unit}
-                    {ing.available > 0 && ` • Have: ${ing.available}`}
-                  </Text>
+          {availability.map((ing, index) => {
+            const hasMultipleLocations = ing.locations && ing.locations.length > 1;
+            const selectedLoc = getSelectedLocation(ing);
+            
+            return (
+              <Pressable 
+                key={index} 
+                style={[styles.ingredientCard, hasMultipleLocations && styles.ingredientCardTappable]}
+                onPress={() => handleIngredientPress(ing)}
+              >
+                <View style={styles.ingredientLeft}>
+                  <Ionicons
+                    name={getStatusIcon(ing.status) as any}
+                    size={20}
+                    color={getStatusColor(ing.status)}
+                  />
+                  <View style={styles.ingredientInfo}>
+                    <Text style={styles.ingredientName}>{ing.ingredient}</Text>
+                    <Text style={styles.ingredientQty}>
+                      Need: {ing.required} {ing.unit}
+                      {ing.available > 0 && ` • Have: ${ing.available}`}
+                    </Text>
+                    {/* Show selected location if multiple exist */}
+                    {hasMultipleLocations && selectedLoc && (
+                      <View style={styles.locationSelector}>
+                        <Ionicons name="location-outline" size={12} color={colors.primary} />
+                        <Text style={styles.locationText}>
+                          {selectedLoc.location} ({selectedLoc.quantity} {ing.unit})
+                        </Text>
+                        <Ionicons name="chevron-down" size={14} color={colors.primary} />
+                      </View>
+                    )}
+                    {/* Show single location info if only one */}
+                    {ing.locations && ing.locations.length === 1 && (
+                      <View style={styles.singleLocation}>
+                        <Ionicons name="location-outline" size={12} color={colors.textMuted} />
+                        <Text style={styles.singleLocationText}>
+                          {ing.locations[0].location}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-              <View style={[
-                styles.statusBadge,
-                { backgroundColor: getStatusColor(ing.status) + '20' }
-              ]}>
-                <Text style={[
-                  styles.statusBadgeText,
-                  { color: getStatusColor(ing.status) }
-                ]}>
-                  {getStatusLabel(ing.status)}
-                </Text>
-              </View>
-            </View>
-          ))}
+                <View style={styles.ingredientRight}>
+                  <View style={[
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(ing.status) + '20' }
+                  ]}>
+                    <Text style={[
+                      styles.statusBadgeText,
+                      { color: getStatusColor(ing.status) }
+                    ]}>
+                      {getStatusLabel(ing.status)}
+                    </Text>
+                  </View>
+                  {hasMultipleLocations && (
+                    <Text style={styles.tapToChange}>Tap to change</Text>
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Emergency Stock Notice */}
@@ -262,6 +360,81 @@ export default function RecipeDetailScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Location Selection Modal */}
+      <Modal
+        visible={showLocationModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLocationModal(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setShowLocationModal(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Choose Location</Text>
+            {selectedIngredient && (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  Where should {selectedIngredient.ingredient} be taken from?
+                </Text>
+                <View style={styles.locationOptions}>
+                  {selectedIngredient.locations?.map((loc) => {
+                    const isSelected = locationChoices[selectedIngredient.ingredient] === loc.item_id;
+                    const hasEnough = loc.quantity >= selectedIngredient.required;
+                    
+                    return (
+                      <TouchableOpacity
+                        key={loc.item_id}
+                        style={[
+                          styles.locationOption,
+                          isSelected && styles.locationOptionSelected,
+                          !hasEnough && styles.locationOptionInsufficient
+                        ]}
+                        onPress={() => handleSelectLocation(selectedIngredient, loc.item_id)}
+                      >
+                        <View style={styles.locationOptionLeft}>
+                          <Ionicons 
+                            name={isSelected ? 'radio-button-on' : 'radio-button-off'} 
+                            size={20} 
+                            color={isSelected ? colors.primary : colors.textMuted} 
+                          />
+                          <View style={styles.locationOptionInfo}>
+                            <Text style={[
+                              styles.locationOptionName,
+                              isSelected && styles.locationOptionNameSelected
+                            ]}>
+                              {loc.location}
+                            </Text>
+                            <Text style={styles.locationOptionQty}>
+                              Available: {loc.quantity} {selectedIngredient.unit}
+                            </Text>
+                          </View>
+                        </View>
+                        {!hasEnough && (
+                          <View style={styles.insufficientBadge}>
+                            <Text style={styles.insufficientText}>Not enough</Text>
+                          </View>
+                        )}
+                        {hasEnough && isSelected && (
+                          <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity
+                  style={styles.modalDoneBtn}
+                  onPress={() => setShowLocationModal(false)}
+                >
+                  <Text style={styles.modalDoneText}>Done</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -418,5 +591,135 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: spacing.sm,
+  },
+  // New styles for location selection
+  ingredientCardTappable: {
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+  },
+  ingredientRight: {
+    alignItems: 'flex-end',
+  },
+  locationSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+    backgroundColor: colors.primary + '15',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.full,
+    alignSelf: 'flex-start',
+  },
+  locationText: {
+    ...typography.caption,
+    color: colors.primary,
+    marginHorizontal: 4,
+    fontSize: 11,
+  },
+  singleLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  singleLocationText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginLeft: 4,
+    fontSize: 11,
+  },
+  tapToChange: {
+    ...typography.caption,
+    color: colors.primary,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 340,
+  },
+  modalTitle: {
+    ...typography.h2,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    marginBottom: spacing.lg,
+  },
+  locationOptions: {
+    gap: spacing.sm,
+  },
+  locationOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  locationOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '10',
+  },
+  locationOptionInsufficient: {
+    opacity: 0.7,
+  },
+  locationOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  locationOptionInfo: {
+    marginLeft: spacing.sm,
+  },
+  locationOptionName: {
+    ...typography.body,
+    fontWeight: '500',
+  },
+  locationOptionNameSelected: {
+    color: colors.primary,
+  },
+  locationOptionQty: {
+    ...typography.caption,
+    marginTop: 2,
+  },
+  insufficientBadge: {
+    backgroundColor: colors.danger + '20',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  insufficientText: {
+    ...typography.caption,
+    color: colors.danger,
+    fontSize: 10,
+  },
+  modalDoneBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  modalDoneText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '600',
   },
 });

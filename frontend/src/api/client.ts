@@ -42,8 +42,12 @@ export const recipesApi = {
   update: (id: string, data: any) => api.put(`/recipes/${id}`, data),
   delete: (id: string) => api.delete(`/recipes/${id}`),
   checkAvailability: (id: string) => api.get(`/recipes/${id}/availability`),
-  cook: (id: string, use_emergency: boolean = false) =>
-    api.post(`/recipes/${id}/cook`, { recipe_id: id, use_emergency_stock: use_emergency }),
+  cook: (id: string, use_emergency: boolean = false, location_choices?: { ingredient_name: string; item_id: string }[]) =>
+    api.post(`/recipes/${id}/cook`, { 
+      recipe_id: id, 
+      use_emergency_stock: use_emergency,
+      location_choices: location_choices || null
+    }),
   whatCanICook: () => api.get('/recipes/suggestions/what-can-i-cook'),
 };
 

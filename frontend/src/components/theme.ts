@@ -5,11 +5,13 @@ export const colors = {
   primary: '#7CB342',
   primaryLight: '#AED581',
   primaryDark: '#558B2F',
+  secondary: '#5C6BC0',  // Indigo - for store indicators
   
   // Text colors
   textPrimary: '#3E2723',
   textSecondary: '#6D4C41',
   textMuted: '#A1887F',
+  text: '#3E2723',
   
   // Status colors
   success: '#7CB342',

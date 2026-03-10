@@ -109,6 +109,7 @@ class ShoppingListItemCreate(BaseModel):
     quantity: float
     unit: str
     location: str = "Uncategorized"
+    store: str = "Any Store"
 
 class ShoppingListItemUpdate(BaseModel):
     name: Optional[str] = None
@@ -116,6 +117,7 @@ class ShoppingListItemUpdate(BaseModel):
     unit: Optional[str] = None
     checked: Optional[bool] = None
     location: Optional[str] = None
+    store: Optional[str] = None
 
 class ShoppingListItemResponse(BaseModel):
     id: str
@@ -124,6 +126,7 @@ class ShoppingListItemResponse(BaseModel):
     unit: str
     checked: bool
     location: str = "Uncategorized"
+    store: str = "Any Store"
     created_at: datetime
     updated_at: datetime
 
@@ -1146,6 +1149,9 @@ async def get_shopping_list(household_id: Optional[str] = None):
         # Add default location for items that don't have it
         if 'location' not in doc:
             doc['location'] = 'Uncategorized'
+        # Add default store for items that don't have it
+        if 'store' not in doc:
+            doc['store'] = 'Any Store'
         result.append(ShoppingListItemResponse(**doc))
     return result
 
@@ -1249,6 +1255,92 @@ async def add_missing_to_shopping_list(ingredients: List[IngredientBase]):
         added.append(ing.name)
     
     return {"message": f"Added {len(added)} items to shopping list", "items": added}
+
+# ==================== STORES MANAGEMENT ENDPOINTS ====================
+
+@api_router.get("/stores")
+async def get_stores(household_id: Optional[str] = None):
+    """Get all stores for shopping list categorization"""
+    query = {}
+    if household_id:
+        query["household_id"] = household_id
+    stores = await db.stores.find(query).to_list(100)
+    store_names = [store['name'] for store in stores]
+    
+    # Always include "Any Store" as default
+    if "Any Store" not in store_names:
+        store_names.insert(0, "Any Store")
+    
+    return {"stores": store_names}
+
+@api_router.post("/stores")
+async def create_store(name: str, household_id: Optional[str] = None):
+    """Create a new store"""
+    # Check if store already exists
+    query = {"name": name}
+    if household_id:
+        query["household_id"] = household_id
+    
+    existing = await db.stores.find_one(query)
+    if existing:
+        raise HTTPException(status_code=400, detail="Store already exists")
+    
+    now = datetime.utcnow()
+    store_doc = {
+        "name": name,
+        "created_at": now,
+        "updated_at": now
+    }
+    if household_id:
+        store_doc["household_id"] = household_id
+    
+    await db.stores.insert_one(store_doc)
+    return {"message": "Store created", "name": name}
+
+@api_router.put("/stores/{old_name}")
+async def rename_store(old_name: str, new_name: str, household_id: Optional[str] = None):
+    """Rename a store and update all shopping list items"""
+    if old_name == "Any Store":
+        raise HTTPException(status_code=400, detail="Cannot rename 'Any Store'")
+    
+    # Update store name
+    query = {"name": old_name}
+    if household_id:
+        query["household_id"] = household_id
+    
+    result = await db.stores.update_one(
+        query,
+        {"$set": {"name": new_name, "updated_at": datetime.utcnow()}}
+    )
+    
+    # Update all shopping list items with this store
+    await db.shopping_list.update_many(
+        {"store": old_name},
+        {"$set": {"store": new_name, "updated_at": datetime.utcnow()}}
+    )
+    
+    return {"message": f"Renamed '{old_name}' to '{new_name}'"}
+
+@api_router.delete("/stores/{name}")
+async def delete_store(name: str, household_id: Optional[str] = None):
+    """Delete a store and move items to 'Any Store'"""
+    if name == "Any Store":
+        raise HTTPException(status_code=400, detail="Cannot delete 'Any Store'")
+    
+    query = {"name": name}
+    if household_id:
+        query["household_id"] = household_id
+    
+    # Delete the store
+    await db.stores.delete_one(query)
+    
+    # Move all items with this store to "Any Store"
+    await db.shopping_list.update_many(
+        {"store": name},
+        {"$set": {"store": "Any Store", "updated_at": datetime.utcnow()}}
+    )
+    
+    return {"message": f"Deleted store '{name}' and moved items to 'Any Store'"}
 
 # ==================== DASHBOARD ENDPOINT ====================
 

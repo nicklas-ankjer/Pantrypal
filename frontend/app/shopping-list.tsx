@@ -29,10 +29,13 @@ export default function ShoppingListScreen() {
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('pieces');
   const [newItemLocation, setNewItemLocation] = useState('Uncategorized');
+  const [newItemStore, setNewItemStore] = useState('Any Store');
   const [showAddForm, setShowAddForm] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [locations, setLocations] = useState<string[]>(['Uncategorized']);
+  const [stores, setStores] = useState<string[]>(['Any Store']);
+  const [groupByStore, setGroupByStore] = useState(true);
   
   // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -40,7 +43,12 @@ export default function ShoppingListScreen() {
   const [editQuantity, setEditQuantity] = useState('');
   const [editUnit, setEditUnit] = useState('');
   const [editLocation, setEditLocation] = useState('Uncategorized');
+  const [editStore, setEditStore] = useState('Any Store');
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Store management modal
+  const [showStoreModal, setShowStoreModal] = useState(false);
+  const [newStoreName, setNewStoreName] = useState('');
   
   const {
     shoppingList,
@@ -69,11 +77,25 @@ export default function ShoppingListScreen() {
     }
   };
 
+  // Fetch stores from API
+  const fetchStores = async () => {
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/stores`);
+      const data = await response.json();
+      if (data.stores && data.stores.length > 0) {
+        setStores(data.stores);
+      }
+    } catch (error) {
+      console.error('Error fetching stores:', error);
+    }
+  };
+
   useEffect(() => {
     fetchShoppingList();
     fetchHomeStock();
     fetchEmergencyStock();
     fetchLocations();
+    fetchStores();
   }, []);
 
   // Auto-open edit modal if editItemId is passed
@@ -85,10 +107,24 @@ export default function ShoppingListScreen() {
         setEditQuantity(itemToEdit.quantity.toString());
         setEditUnit(itemToEdit.unit);
         setEditLocation(itemToEdit.location || 'Uncategorized');
+        setEditStore(itemToEdit.store || 'Any Store');
         setEditModalVisible(true);
       }
     }
   }, [editItemId, shoppingList]);
+
+  // Group shopping list by store
+  const groupedByStore = useMemo(() => {
+    const groups: { [key: string]: ShoppingListItem[] } = {};
+    shoppingList.forEach(item => {
+      const store = item.store || 'Any Store';
+      if (!groups[store]) {
+        groups[store] = [];
+      }
+      groups[store].push(item);
+    });
+    return groups;
+  }, [shoppingList]);
 
   // Get suggestions from home stock and emergency stock based on input
   const suggestions = useMemo(() => {
@@ -132,16 +168,38 @@ export default function ShoppingListScreen() {
         quantity: parseFloat(newItemQty) || 1,
         unit: newItemUnit,
         location: newItemLocation,
+        store: newItemStore,
       });
       
       setNewItemName('');
       setNewItemQty('1');
       setNewItemLocation('Uncategorized');
+      setNewItemStore('Any Store');
       setShowAddForm(false);
       setShowSuggestions(false);
     } catch (error) {
       console.error('Add item error:', error);
       Alert.alert('Error', 'Failed to add item');
+    }
+  };
+
+  // Handle adding a new store
+  const handleAddStore = async () => {
+    if (!newStoreName.trim()) {
+      Alert.alert('Error', 'Please enter a store name');
+      return;
+    }
+    
+    try {
+      await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/stores?name=${encodeURIComponent(newStoreName.trim())}`, {
+        method: 'POST',
+      });
+      await fetchStores();
+      setNewStoreName('');
+      setShowStoreModal(false);
+    } catch (error) {
+      console.error('Add store error:', error);
+      Alert.alert('Error', 'Failed to add store');
     }
   };
 
@@ -167,6 +225,7 @@ export default function ShoppingListScreen() {
     setEditQuantity(item.quantity.toString());
     setEditUnit(item.unit);
     setEditLocation(item.location || 'Uncategorized');
+    setEditStore(item.store || 'Any Store');
     setEditModalVisible(true);
   };
 
@@ -184,7 +243,8 @@ export default function ShoppingListScreen() {
       await updateShoppingListItem(selectedItem.id, { 
         quantity: newQty,
         unit: editUnit,
-        location: editLocation 
+        location: editLocation,
+        store: editStore
       });
       setEditModalVisible(false);
       setSelectedItem(null);
@@ -244,12 +304,20 @@ export default function ShoppingListScreen() {
         <Text style={[styles.itemQty, item.checked && styles.checkedText]}>
           {item.quantity} {item.unit}
         </Text>
-        {item.location && item.location !== 'Uncategorized' && (
-          <View style={styles.itemLocationBadge}>
-            <Ionicons name="location-outline" size={12} color={colors.primary} />
-            <Text style={styles.itemLocationText}>{item.location}</Text>
-          </View>
-        )}
+        <View style={styles.itemBadges}>
+          {item.store && item.store !== 'Any Store' && (
+            <View style={styles.itemStoreBadge}>
+              <Ionicons name="storefront-outline" size={12} color={colors.secondary} />
+              <Text style={styles.itemStoreText}>{item.store}</Text>
+            </View>
+          )}
+          {item.location && item.location !== 'Uncategorized' && (
+            <View style={styles.itemLocationBadge}>
+              <Ionicons name="location-outline" size={12} color={colors.primary} />
+              <Text style={styles.itemLocationText}>{item.location}</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.tapHint}>Tap to edit</Text>
       </View>
       
@@ -371,6 +439,37 @@ export default function ShoppingListScreen() {
                 />
                 <Text style={[styles.locationChipText, newItemLocation === loc && styles.locationChipTextActive]}>
                   {loc}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          
+          {/* Store selector for add form */}
+          <View style={styles.storeLabelRow}>
+            <Text style={styles.locationLabel}>Buy from store:</Text>
+            <Pressable onPress={() => setShowStoreModal(true)}>
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+            </Pressable>
+          </View>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.locationScroll}
+            contentContainerStyle={styles.locationScrollContent}
+          >
+            {stores.map((store) => (
+              <Pressable
+                key={store}
+                style={[styles.storeChip, newItemStore === store && styles.storeChipActive]}
+                onPress={() => setNewItemStore(store)}
+              >
+                <Ionicons 
+                  name={newItemStore === store ? 'storefront' : 'storefront-outline'} 
+                  size={14} 
+                  color={newItemStore === store ? colors.white : colors.secondary} 
+                />
+                <Text style={[styles.storeChipText, newItemStore === store && styles.storeChipTextActive]}>
+                  {store}
                 </Text>
               </Pressable>
             ))}
@@ -511,6 +610,31 @@ export default function ShoppingListScreen() {
               ))}
             </ScrollView>
 
+            {/* Store selector in edit modal */}
+            <Text style={styles.unitLabel}>Buy from store</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.modalLocationSelector}
+            >
+              {stores.map((store) => (
+                <TouchableOpacity
+                  key={store}
+                  style={[styles.modalStoreBtn, editStore === store && styles.modalStoreBtnActive]}
+                  onPress={() => setEditStore(store)}
+                >
+                  <Ionicons 
+                    name={editStore === store ? 'storefront' : 'storefront-outline'} 
+                    size={14} 
+                    color={editStore === store ? colors.white : colors.secondary} 
+                  />
+                  <Text style={[styles.modalStoreText, editStore === store && styles.modalStoreTextActive]}>
+                    {store}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
@@ -531,6 +655,51 @@ export default function ShoppingListScreen() {
                 ) : (
                   <Text style={styles.modalSaveText}>Save</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Add Store Modal */}
+      <Modal
+        visible={showStoreModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStoreModal(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setShowStoreModal(false)}
+        >
+          <Pressable style={styles.editModal} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Add New Store</Text>
+            <Text style={styles.modalSubtitle}>Enter the store name</Text>
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g., Walmart, Costco"
+              placeholderTextColor={colors.textMuted}
+              value={newStoreName}
+              onChangeText={setNewStoreName}
+              autoFocus
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setShowStoreModal(false);
+                  setNewStoreName('');
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveBtn}
+                onPress={handleAddStore}
+              >
+                <Text style={styles.modalSaveText}>Add Store</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -983,5 +1152,100 @@ const styles = StyleSheet.create({
   },
   modalLocationTextActive: {
     color: colors.white,
+  },
+  // Store chip styles (add form)
+  storeLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  storeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.background,
+    marginRight: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  storeChipActive: {
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary,
+  },
+  storeChipText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginLeft: spacing.xs,
+  },
+  storeChipTextActive: {
+    color: colors.white,
+  },
+  // Item badges container
+  itemBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  // Item store badge styles
+  itemStoreBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.secondary + '20',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  itemStoreText: {
+    ...typography.caption,
+    color: colors.secondary,
+    marginLeft: 4,
+    fontSize: 11,
+  },
+  // Modal store selector styles
+  modalStoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    marginRight: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalStoreBtnActive: {
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary,
+  },
+  modalStoreText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginLeft: spacing.xs,
+  },
+  modalStoreTextActive: {
+    color: colors.white,
+  },
+  // Modal input
+  modalInput: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    ...typography.body,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+  },
+  modalSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.md,
   },
 });

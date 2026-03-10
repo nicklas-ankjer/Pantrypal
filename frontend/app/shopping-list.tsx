@@ -494,18 +494,60 @@ export default function ShoppingListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={[...uncheckedItems, ...checkedItems]}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
+        <ScrollView 
+          style={styles.scrollView}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            uncheckedItems.length > 0 ? (
+        >
+          {/* Unchecked items grouped by store */}
+          {uncheckedItems.length > 0 && (
+            <>
               <Text style={styles.sectionLabel}>To Buy ({uncheckedItems.length})</Text>
-            ) : null
-          }
-        />
+              {Object.entries(
+                uncheckedItems.reduce((acc, item) => {
+                  const store = item.store || 'Any Store';
+                  if (!acc[store]) acc[store] = [];
+                  acc[store].push(item);
+                  return acc;
+                }, {} as Record<string, ShoppingListItem[]>)
+              )
+                .sort(([a], [b]) => {
+                  // "Any Store" goes to the end
+                  if (a === 'Any Store') return 1;
+                  if (b === 'Any Store') return -1;
+                  return a.localeCompare(b);
+                })
+                .map(([store, items]) => (
+                  <View key={store} style={styles.storeGroup}>
+                    <View style={styles.storeHeader}>
+                      <Ionicons name="storefront" size={18} color={colors.secondary} />
+                      <Text style={styles.storeHeaderText}>{store}</Text>
+                      <Text style={styles.storeItemCount}>({items.length})</Text>
+                    </View>
+                    {items.map((item) => (
+                      <View key={item.id}>
+                        {renderItem({ item })}
+                      </View>
+                    ))}
+                  </View>
+                ))}
+            </>
+          )}
+          
+          {/* Checked items (not grouped, just listed) */}
+          {checkedItems.length > 0 && (
+            <>
+              <Text style={[styles.sectionLabel, styles.checkedSectionLabel]}>
+                Checked ({checkedItems.length})
+              </Text>
+              {checkedItems.map((item) => (
+                <View key={item.id}>
+                  {renderItem({ item })}
+                </View>
+              ))}
+            </>
+          )}
+        </ScrollView>
       )}
 
       {/* Bottom Actions - Always show when there are checked items */}
@@ -1247,5 +1289,36 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.md,
+  },
+  // Store grouping styles
+  scrollView: {
+    flex: 1,
+  },
+  storeGroup: {
+    marginBottom: spacing.lg,
+  },
+  storeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.secondary + '15',
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.sm,
+  },
+  storeHeaderText: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginLeft: spacing.sm,
+    flex: 1,
+  },
+  storeItemCount: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  checkedSectionLabel: {
+    marginTop: spacing.lg,
+    color: colors.textMuted,
   },
 });

@@ -1,112 +1,128 @@
 <analysis>
-
-**original_problem_statement**: The user wants to build a mobile application called Kitchen Counter to manage household inventory, recipes, shopping lists, and emergency supplies.
+**original_problem_statement**: The user wants to build a mobile application called Kitchen Counter to manage household inventory, recipes, shopping lists, and emergency supplies. The application has evolved to include a multi-user household system for sharing all data, push notifications for expiring items, and advanced categorization for stock and shopping lists.
 
 **PRODUCT REQUIREMENTS**:
 -   **Core Functionality**: Track home stock, manage recipes, create shopping lists, and monitor emergency supplies.
--   **Navigation**: A bottom tab bar for Recipes, Home Stock, and Emergency Stock. A top-right icon for the Shopping List.
--   **Home Dashboard**: A central screen showing low stock alerts, expiring items, cookable recipes, and shopping list reminders.
--   **Recipes**: Users manage their own recipes. The app should show ingredient availability from the Home Stock. A Cook Recipe function deducts ingredients from stock. A What can I cook? feature suggests recipes based on available ingredients.
--   **Shopping List**: Items can be added manually or automatically from recipes. Users can check off items and move them all to Home Stock.
--   **Home Stock**: Tracks everyday items with safety stock levels. Includes a Quick Add feature. Items can be organized into user-defined locations/categories (e.g., Freezer, Pantry).
--   **Emergency Stock**: Tracks long-term supplies sorted by expiration date, with notifications for expiring items.
--   **Design**: A clean, minimalistic, kitchen counter aesthetic with a warm, neutral color palette.
+-   **Household System**: Users can register with a username and PIN, create a Household, and invite other users via a generated code. All data (stock, recipes, lists) must be shared in real-time within the household.
+-   **Recipes**: Users manage recipes. The app should show ingredient availability from Home Stock, considering items might exist in multiple locations. A Cook Recipe function deducts ingredients from stock.
+-   **Shopping List**: Items can be added manually or from recipes. The list should be categorizable by user-defined store names and sorted/grouped by those stores. Users want to be able to re-categorize items easily.
+-   **Home Stock**: Items have safety stock levels and can be organized into user-defined locations/categories.
+-   **Emergency Stock**: Tracks items with expiration dates.
+-   **Notifications**: The app should send push notifications to all household members when an emergency stock item is 30, 14, or 7 days from expiring. (This feature is currently blocked).
 
 **User's preferred language**: English
 
 **what currently exists?**
-A functional full-stack Expo application with a FastAPI backend and MongoDB database. Most of the core features have been implemented:
--   **Frontend**: A complete UI with a tab-based navigation system for Home, Recipes, Home Stock, and Emergency Stock. Modals are used for adding/editing items and viewing the shopping list. The UI is data-driven, reflecting the state of the backend.
--   **Backend**: CRUD APIs for all major entities (Home Stock, Emergency Stock, Recipes, Shopping List) are implemented and working.
+A full-stack Expo application with a FastAPI backend and MongoDB database. The app has most of the core features implemented, including a multi-user household system with username/PIN authentication.
+
+-   **Frontend**: A complete UI with tab-based navigation. It features screens for a home dashboard, recipes, stock management, and settings. Modals are used extensively for adding/editing data. New screens for authentication (), household management (), and settings () have been created.
+-   **Backend**: The backend has been significantly refactored to support a multi-tenant household system. All primary data collections (home stock, emergency stock, recipes, shopping list) are now associated with a . Endpoints for user registration, login, and household management (create, join) are implemented.
 -   **Features Implemented**:
-    -   Adding, editing, and deleting items in Home Stock, Emergency Stock, and the Shopping List.
-    -   Creating recipes.
-    -   A What can I cook? feature.
-    -   A dashboard that shows low-stock alerts and recipe suggestions.
-    -   A category/location system for Home Stock, allowing users to organize items into collapsible sections and manage these locations.
-    -   Autocomplete for the shopping list input, suggesting items from the existing home stock.
-    -   Tapping on stock/shopping list items opens a modal to edit quantity.
+    -   User authentication (username/PIN) and a full household system for data sharing via invite codes.
+    -   Home Stock items can be categorized by .
+    -   Shopping List items can be categorized by , and the list is displayed grouped by store.
+    -   Recipe cooking logic allows users to choose which  to deduct an ingredient from if it exists in multiple places.
+    -   UI/UX: A settings icon has been added to the header. The home screen layout has been cleaned up by removing the Quick Adjustments section.
 
 **Last working item**:
-    - Last item agent was working: The agent was adding functionality to assign a  to items on the shopping list. This allows users to specify where an item should go when it's moved from the shopping list to the home stock.
-    - The backend  model,  endpoint, and  endpoint in  have been updated to support this. The corresponding frontend type in  was also updated.
+    - Last item agent was working: The user requested a way to move a shopping list item from one store category to another (e.g., from Any Store to Føtex). The agent decided to implement this via a long-press to move interaction, as true drag-and-drop is complex. The agent started by adding the necessary state and handler function stubs (, ) to .
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? backend testing agent
+    - Which testing method agent to use? Frontend screenshot tool to verify the modal opens and an item can be moved.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Finish implementing location selection in the Shopping List. (P0)
-  - Issue 2: The Cook Recipe logic does not handle ingredients that exist in multiple locations. (P1)
-  - Issue 3: The delete button on the Home Stock screen is a red square instead of a trash can icon. (P2)
+  - Issue 1: Finish implementing long-press to move for shopping list items. (P0)
+  - Issue 2: Items added to the shopping list from a recipe do not have a store assigned. (P1)
+  - Issue 3: Frontend user session (authentication state) is not persisted. (P1)
+  - Issue 4: The delete button on the Home Stock screen is a red square instead of an icon. (P2)
 
   **Issues Detail**:
-  - **Issue 1**: Finish implementing location selection in the Shopping List. (P0)
-     - **Attempted fixes**: Backend models and API endpoints in  have been updated to include a  field for shopping list items. The frontend type definition has also been updated.
+  - **Issue 1**: Finish implementing long-press to move for shopping list items. (P0)
+     - **Attempted fixes**: Added state variables (, ) and handler function stubs (, ) in .
      - **Next debug checklist**:
-       1.  Modify  to include a location picker in the add item and edit item modals.
-       2.  The location picker should be populated with the list of existing locations from the  endpoint.
-       3.  Ensure the  and  functions in  send the  field to the backend.
-     - **Why fix this issue and what will be achieved with the fix?**: This will fulfill the user's request to pre-assign a location to a shopping list item, so it's automatically placed in the correct category when moved to Home Stock.
+       1. In , create the UI for the Move to Store modal. This modal should list all available stores.
+       2. Update the  function to open this modal and set the selected item.
+       3. Implement the logic in  to update the item's store via an API call and refresh the local state.
+       4. Attach the  prop to the  for each shopping list item, calling .
+     - **Why fix this issue and what will be achieved with the fix?**: This fulfills the user's request for an easy way to categorize items that are initially added without a specific store.
      - **Status**: IN PROGRESS
      - **Is recurring issue?** N
-     - **Should Test frontend/backend/both after fix?**: Both.
+     - **Should Test frontend/backend/both after fix?**: Frontend.
      - **Blocked on other issue**: None.
 
-  - **Issue 2**: The Cook Recipe logic does not handle ingredients that exist in multiple locations. (P1)
-     - **Attempted fixes**: None. This feature request was acknowledged but not implemented.
+  - **Issue 2**: Items added to the shopping list from a recipe do not have a store assigned. (P1)
+     - **Attempted fixes**: None. This was part of the user's last request but was not addressed.
      - **Next debug checklist**:
-        1.  In , when the user presses Cook Recipe, check if any required ingredients exist in more than one location in the Home Stock.
-        2.  If so, present a modal or a series of prompts to the user, asking them to select which location to deduct the ingredient from.
-        3.  Update the  function and the corresponding backend API call to specify the source location for deduction.
-     - **Why fix this issue and what will be achieved with the fix?**: This is a direct user request (Message #184) and is critical for the location/category feature to be fully usable. It gives the user control over their inventory management.
+       1. Locate the add missing to list functionality in the recipe detail screen ().
+       2. When this function is triggered, instead of adding items directly, present a modal to the user.
+       3. This modal should either let the user select a single store for all missing items, or allow them to assign stores individually.
+       4. Update the API call to include the selected store information when adding items to the shopping list.
+     - **Why fix this issue and what will be achieved with the fix?**: This improves the shopping experience by allowing users to pre-categorize ingredients by store directly from a recipe, reducing manual organization later.
      - **Status**: NOT STARTED
      - **Is recurring issue?** N
-     - **Should Test frontend/backend/both after fix?**: Both.
+     - **Should Test frontend/backend/both after fix?**: Frontend.
      - **Blocked on other issue**: None.
 
-  - **Issue 3**: The delete button on the Home Stock screen is a red square instead of a trash can icon. (P2)
-     - **Attempted fixes**: The agent correctly identified that a  style was overriding the icon's appearance in . The fix was planned but not fully implemented in the code rewrite for the locations feature.
+  - **Issue 3**: Frontend user session (authentication state) is not persisted. (P1)
+     - **Attempted fixes**: The agent tried using  with , which caused the web build to fail with an  error, breaking all icons. The agent removed the persistence middleware from  to fix the UI.
      - **Next debug checklist**:
-        1.  In , locate the  for the delete button ().
-        2.  Remove the  property from the style, allowing the  component to render as an icon.
-     - **Why fix this issue and what will be achieved with the fix?**: This is a minor UI bug that breaks visual consistency with other screens. Fixing it will improve the user experience.
+       1. Investigate a reliable, cross-platform persistence solution for Zustand that is compatible with Expo's web builds.
+       2. A potential library to explore is  or a custom storage implementation that safely handles web (localStorage) and native (AsyncStorage) environments.
+       3. Re-implement the persistence middleware in , ensuring it does not break the web preview.
+     - **Why fix this issue and what will be achieved with the fix?**: A user currently has to log in every time they refresh the app or navigate between certain pages. Fixing this is critical for a usable authentication flow.
      - **Status**: NOT STARTED
-     - **Is recurring issue?** Y (It was introduced during a refactor)
+     - **Is recurring issue?** Y
+     - **Should Test frontend/backend/both after fix?**: Frontend.
+     - **Blocked on other issue**: None.
+
+  - **Issue 4**: The delete button on the Home Stock screen is a red square instead of an icon. (P2)
+     - **Attempted fixes**: This was identified in the very first summary but has not been worked on. The issue is in .
+     - **Next debug checklist**:
+        1. In , find the  for the delete button.
+        2. Remove the  property that is overriding the  component.
+     - **Why fix this issue and what will be achieved with the fix?**: This is a minor but long-standing UI bug. Fixing it improves visual consistency.
+     - **Status**: NOT STARTED
+     - **Is recurring issue?** Y
      - **Should Test frontend/backend/both after fix?**: Frontend.
      - **Blocked on other issue**: None.
 
 **In progress Task List**:
-  - **Task 1**: Implement location selection UI in the Shopping List (P0)
-     - **Where to resume**: . The task is to add a dropdown or similar input to the item creation/editing process, allowing the user to select a location.
-     - **What will be achieved with this?**: Users will be able to assign a home stock location to an item while it's still on the shopping list.
+  - **Task 1**: Implement long-press to move item UI and logic for the Shopping List (P0)
+     - **Where to resume**: .
+     - **What will be achieved with this?**: Users will be able to re-assign a store to a shopping list item via a long-press action.
      - **Status**: IN PROGRESS
-     - **Should Test frontend/backend/both after fix?**: Both.
+     - **Should Test frontend/backend/both after fix?**: Frontend.
      - **Blocked on something**: No.
 
 **Upcoming and Future Tasks**
--   **Upcoming Tasks**:
-    -   **Update Recipe Cooking Logic for Multiple Locations (P0)**: As detailed in Pending Issues, modify the recipe cooking flow to allow users to select which stock location to use if an ingredient exists in multiple places. (File: ).
 -   **Future Tasks**:
-    -   **Household System (P1)**: Implement the multi-user household feature where users can be invited to share all data (recipes, stock, lists) in real-time. This will require an authentication system and data synchronization.
-    -   **Notifications (P1)**: Implement push notifications for low stock alerts and item expiration dates (for both home and emergency stock). This will likely involve using  and a backend task scheduler.
-    -   **Emergency Stock Integration (P2)**: Implement the feature where the app prompts the user to use an item from the Emergency Stock if it's missing from Home Stock when trying to cook a recipe.
+    -   **Push Notifications for Expiration Dates (P0 - BLOCKED)**: Implement push notifications for emergency stock. The backend scheduler and API endpoints are in place in . The frontend implementation was started but had to be removed because  is not compatible with the Expo Go environment used for testing. **This task is blocked until the project is run in a development build.** Do not attempt to re-install .
 
 **Completed work in this session**
--   **Recently completed**:
-    -   Full backend and frontend for CRUD operations on all main features (Home Stock, Emergency Stock, Recipes, Shopping List).
-    -   Home Stock Location System: Implemented collapsible UI for locations, and modals to add, rename, and delete locations.
-    -   Shopping List Enhancements: Added tap-to-edit quantity and autocomplete suggestions based on home stock.
-    -   Emergency Stock Enhancements: Added tap-to-edit and delete functionality.
-    -   Dashboard: Implemented a quick add to list button for low-stock items that adds the item and opens the shopping list for quantity editing.
-    -   UI/UX: Replaced native alerts with custom modals for a consistent user experience.
+- **Recently completed**:
+  - **Household System (DONE)**: Implemented a full multi-user system with username/PIN auth, household creation, and joining via invite code. Backend models were updated to be multi-tenant.
+  - **Recipe Cooking with Locations (DONE)**: Updated the recipe screen to allow users to choose which stock location to use if an ingredient is in multiple places.
+  - **Shopping List Store Categorization (DONE)**: Added the ability to assign items to different stores.
+  - **Shopping List Grouping (DONE)**: The shopping list UI now groups items by their assigned store.
+  - **UI/Layout (DONE)**: Added a settings icon to the header and removed the Quick Adjustments panel from the home screen. Fixed a critical web-build issue that was causing icons to disappear.
 
 **Earlier issues found/mentioned but not fixed**
-   - **Issue 1**: The recipe cooking logic is not updated for the new locations feature.
+   - **Issue 1**: When adding missing ingredients to the shopping list from a recipe, they are not assigned a store. This was requested by the user but the agent has not started on it.
      - **Debug checklist**: See Pending Issues - Issue 2.
-     - **Why to solve this issue and what will be achieved with this?**: This is a core part of the locations feature requested by the user and is necessary for accurate stock management.
-     - **Should Test frontend/backend/both after fix**: Both.
+     - **Why to solve this issue and what will be achieved with this?**: To improve user workflow and reduce manual sorting.
+     - **Should Test frontend/backend/both after fix**: Frontend.
      - **Is recurring issue?**: N
+   - **Issue 2**: User session is not persisted on the frontend.
+     - **Debug checklist**: See Pending Issues - Issue 3.
+     - **Why to solve this issue and what will be achieved with this?**: Essential for a functional login system.
+     - **Should Test frontend/backend/both after fix**: Frontend.
+     - **Is recurring issue?**: Y
+   - **Issue 3**: Red square delete button on home stock screen.
+     - **Debug checklist**: See Pending Issues - Issue 4.
+     - **Why to solve this issue and what will be achieved with this?**: Minor UI polish.
+     - **Should Test frontend/backend/both after fix**: Frontend.
+     - **Is recurring issue?**: Y
 
 **Known issue recurrence from previous fork**
   - None.
@@ -115,79 +131,84 @@ A functional full-stack Expo application with a FastAPI backend and MongoDB data
 
 
 **Key Technical Concepts**
--   **Frontend**: Expo (React Native), Expo Router (file-based routing), Zustand (state management), TypeScript.
--   **Backend**: FastAPI (Python), Motor (async MongoDB driver), Pydantic (data validation).
+-   **Frontend**: Expo (React Native), Expo Router, Zustand (state management), TypeScript.
+-   **Backend**: FastAPI (Python), Motor (async MongoDB driver), Pydantic.
 -   **Database**: MongoDB.
--   **Architecture**: Full-stack monorepo with a clear separation between the frontend and backend.
+-   **Architecture**: Full-stack monorepo. The backend is now a multi-tenant system where data is partitioned by .
 
 **key DB schema**
+  - **users**: 
+  - **households**: 
   - **homestockitems**: 
   - **recipes**: 
   - **emergencystockitems**: 
   - **shoppinglistitems**: 
 
 **changes in tech stack**
-  - No changes from the initial stack.
+  - No fundamental changes.  was added.  and  were added and then removed due to incompatibility with the testing environment.
 
 **All files of reference**
--   : Contains all backend APIs. Recently updated to add a  field to shopping list items and the corresponding endpoints.
--   : The shopping list UI. **This is the next file to be modified.**
--   : The home stock screen with the locations UI. Needs a minor style fix for the delete button.
--   : The recipe detail screen. Will need updates to handle cooking from multiple locations.
--   : Contains all TypeScript types. Recently updated for the  type.
--   : Contains all API client functions.
--   : Zustand store for global state.
+-   : **Currently being modified.** Target for implementing the long-press to move feature.
+-   : Will need to be modified to handle assigning a  when adding missing ingredients.
+-   : Will need to be modified to implement a working cross-platform persistence solution for the user session.
+-   : Contains the header icons (household, shopping list, settings).
+-   : Contains all backend logic, including the household system and data tenancy rules.
 
 **Areas that need refactoring**:
-- The recipe cooking logic in  and the corresponding backend endpoint will need significant refactoring to support choosing ingredients from multiple locations.
+- The  needs a proper persistence implementation that works on both web and native without breaking the build.
+- The push notification feature is incomplete. The backend code exists, but the frontend part was removed. It will need to be re-integrated carefully when the environment supports it.
 
 **key api endpoints**
--   : GET, POST, PUT, DELETE for home stock items.
--   : GET, PUT, DELETE for managing locations.
--   : GET, POST, PUT, DELETE for shopping list items.
--   : POST to move checked items to home stock.
--   : GET, POST, DELETE for recipes.
--   : GET, POST, PUT, DELETE for emergency stock items.
+-   , 
+-   , 
+-   : (New) GET, PUT for managing shopping stores.
+-   All data endpoints (e.g., , ) now implicitly filter by the  of the authenticated user.
 
 **Critical Info for New Agent**
-- The current, highest-priority task is to complete the location feature for the shopping list by updating the UI in .
-- The user is highly engaged and provides specific, actionable feedback. Prioritize implementing their requests.
-- The next major feature requested after the current one is to handle recipe cooking when ingredients are in multiple locations. This will be a complex task requiring careful planning.
-- There is a minor but noticeable UI bug with the delete button in Home Stock appearing as a red square; this should be a quick fix.
+-   **Highest Priority**: Your first task is to complete the long-press to move feature in . This involves creating a modal and wiring up the long-press gesture.
+-   **Push Notifications are BLOCKED**: Do not attempt to install or use . It is incompatible with the Expo Go environment and will crash the app on mobile. The backend logic exists, but the frontend part can only be built in a development build environment.
+-   **Auth State is NOT PERSISTED**: The user login state is lost on page refresh/navigation because the  middleware was removed to fix a web build issue. This is the next most critical issue to solve after the current task for a usable app.
+-   **Data is Multi-Tenant**: Remember that all data is now tied to a  on the backend. The frontend must be authenticated to interact with any data.
 
 **documents created in this job**
-  -  (updated multiple times).
+  - None.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User (Msg 261)**: when adding stock to the shopping list, also choose location. - **IN PROGRESS**. This is the current task.
-2.  **User (Msg 226)**: user needs to be able to change location name if needed - **DONE**. Agent implemented endpoints and UI to edit/delete location names.
-3.  **User (Msg 203)**: Continue fixing the location issue, the test so far, I cant put stock into location - **DONE**. Agent fixed backend validation and serialization to correctly handle items with and without locations.
-4.  **User (Msg 184)**: 1) Home stock delete button is a red square ( **PENDING**). 2) Add categories/locations to home stock (**DONE**). 3) Handle cooking when an item is in two stocks (**PENDING**).
-5.  **User (Msg 172)**: when i press the little yellow plus to add to shopping list, it only moves to the list, but i need it to also put the product into the list - **DONE**. Agent updated the dashboard button to add the item and then navigate to the shopping list, opening an edit modal.
-6.  **User (Msg 161)**: 1) I can press on items to change their amount, and i can delete them from the list in Home stock. I need to be able to do the same thing in Emergency (**DONE**). 2) Add autocomplete to shopping list (**DONE**).
-7.  **User (Msg 152)**: I want to be able to change the amount of product from the shopping list - **DONE**. Agent added a tap-to-edit modal for shopping list items.
-8.  **User (Msg 119)**: 1) Delete still doesn't work (**DONE** - fixed with a custom modal). 2) add missing to list nothing happens (**DONE** - fixed).
-9.  **User (Msg 92)**: 1) Move checked to stock doesn't work (**DONE**). 2) Need to edit home stock quantity in bulk (**DONE**). 3) Delete product doesn't work (**Initially failed, fixed later**).
+1.  **User (Msg 664)**: Requested two things: 1) a fix for recipe ingredients being added to the shopping list without a store, and 2) a drag-and-drop feature to move items between stores. - **IN PROGRESS** (drag-and-drop part only).
+2.  **User (Msg 645)**: I would like the app to sort the shopping list after store - **DONE**.
+3.  **User (Msg 565)**: The user should have the option to categories their shopping list into different store names - **DONE**.
+4.  **User (Msg 496)**: Settings button does not work on phone - **PARTIALLY RESOLVED**. The button now navigates, but the underlying push notification feature was removed due to environment limitations.
+5.  **User (Msg 460)**: Requested push notifications for expiring emergency stock. - **BLOCKED**.
+6.  **User (Msg 448)**: how can i test that the join function works - **DONE**. Agent provided test credentials and a walkthrough.
+7.  **User (Msg 433)**: it shows no icons now. and i just scanned it with me phone, it shows icons on my phone - **DONE**. Agent fixed the web build issue.
+8.  **User (Msg 388)**: there is nowhere to get the join household code - **RESOLVED**. Agent explained the issue was due to lack of state persistence and proved the backend works.
+9.  **User (Msg 347)**: Nothing happens when pressing Create when creating a household. Also. Remove the quick adjustments from home - **DONE**.
+10. **User (Msg 292)**: all the icons are gone - **DONE**.
 
 **Project Health Check:**
--   **Functional**: The application is largely functional and implements many of the user's core requests.
--   **Not Mocked**: The application uses a live backend and database.
--   **Broken**: The delete icon in  is visually broken. The cooking logic is incomplete for the new locations feature.
+-   **Broken**:
+    -   User authentication state is not persisted on the frontend, requiring frequent re-logins.
+    -   Push notification functionality is non-existent on the frontend due to environment limitations.
+-   **Not Mocked**: The application uses a live backend and database with a full multi-tenant data model.
 
 **3rd Party Integrations**
 -   None.
 
 **Testing status**
-  - Testing agent used after significant changes: YES (backend testing agent was used once early on).
+  - Testing agent used after significant changes: NO
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None.
-  - Known regressions: The delete icon in Home Stock was a functioning icon before the location feature refactor and is now a red square.
+  - Known regressions:
+    - User authentication persistence was removed to fix a build issue.
+    - The delete icon in Home Stock remains a red square.
 
 **Credentials to test flow:**
-- N/A
+-   The database contains test users that can be used for testing the household feature:
+    -   **User 1**: username , PIN 
+    -   **User 2**: username , PIN 
+    -   **Household**: Alice Family Kitchen, Invite Code: 
 
 **What agent forgot to execute**
-- The agent acknowledged the user's request to handle recipe cooking from multiple stock locations (Message #184) but has not yet started implementing it.
-- The agent identified the fix for the red square delete button but did not apply it during the subsequent refactor of .
-
+- The agent did not address the user's request to handle store assignment when adding missing ingredients from a recipe to the shopping list. It only focused on the drag-and-drop part of the user's last message.
+- The long-standing UI bug of the red square delete button on the home stock screen has been consistently ignored.
 </analysis>

@@ -44,6 +44,12 @@ class IngredientBase(BaseModel):
     quantity: float
     unit: str  # grams, liters, pieces
 
+class IngredientWithStore(BaseModel):
+    name: str
+    quantity: float
+    unit: str
+    store: Optional[str] = "Any Store"
+
 class RecipeCreate(BaseModel):
     name: str
     ingredients: List[IngredientBase]
@@ -1230,7 +1236,7 @@ async def move_checked_to_stock():
     return {"message": f"Moved {moved_count} items to home stock", "moved_count": moved_count}
 
 @api_router.post("/shopping-list/add-missing")
-async def add_missing_to_shopping_list(ingredients: List[IngredientBase]):
+async def add_missing_to_shopping_list(ingredients: List[IngredientWithStore]):
     added = []
     for ing in ingredients:
         # Check if already in shopping list
@@ -1247,6 +1253,7 @@ async def add_missing_to_shopping_list(ingredients: List[IngredientBase]):
                 "name": ing.name,
                 "quantity": ing.quantity,
                 "unit": ing.unit,
+                "store": ing.store or "Any Store",
                 "checked": False,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()

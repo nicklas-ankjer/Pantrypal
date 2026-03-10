@@ -50,6 +50,10 @@ export default function ShoppingListScreen() {
   const [showStoreModal, setShowStoreModal] = useState(false);
   const [newStoreName, setNewStoreName] = useState('');
   
+  // Move to store modal (for drag-like functionality)
+  const [showMoveToStoreModal, setShowMoveToStoreModal] = useState(false);
+  const [itemToMove, setItemToMove] = useState<ShoppingListItem | null>(null);
+  
   const {
     shoppingList,
     homeStock,
@@ -220,6 +224,26 @@ export default function ShoppingListScreen() {
     }
   };
 
+  // Long press to move item to another store
+  const handleLongPress = (item: ShoppingListItem) => {
+    setItemToMove(item);
+    setShowMoveToStoreModal(true);
+  };
+
+  // Move item to selected store
+  const handleMoveToStore = async (store: string) => {
+    if (!itemToMove) return;
+    
+    try {
+      await updateShoppingListItem(itemToMove.id, { store });
+      setShowMoveToStoreModal(false);
+      setItemToMove(null);
+    } catch (error) {
+      console.error('Move error:', error);
+      Alert.alert('Error', 'Failed to move item');
+    }
+  };
+
   const handleItemPress = (item: ShoppingListItem) => {
     setSelectedItem(item);
     setEditQuantity(item.quantity.toString());
@@ -284,6 +308,8 @@ export default function ShoppingListScreen() {
     <Pressable 
       style={[styles.itemCard, item.checked && styles.checkedCard]}
       onPress={() => handleItemPress(item)}
+      onLongPress={() => handleLongPress(item)}
+      delayLongPress={400}
     >
       <Pressable
         style={styles.checkbox}
@@ -318,7 +344,7 @@ export default function ShoppingListScreen() {
             </View>
           )}
         </View>
-        <Text style={styles.tapHint}>Tap to edit</Text>
+        <Text style={styles.tapHint}>Tap to edit • Hold to move</Text>
       </View>
       
       <Pressable
@@ -744,6 +770,86 @@ export default function ShoppingListScreen() {
                 <Text style={styles.modalSaveText}>Add Store</Text>
               </TouchableOpacity>
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Move to Store Modal (Long Press) */}
+      <Modal
+        visible={showMoveToStoreModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowMoveToStoreModal(false);
+          setItemToMove(null);
+        }}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => {
+            setShowMoveToStoreModal(false);
+            setItemToMove(null);
+          }}
+        >
+          <Pressable style={styles.moveStoreModal} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.moveStoreHeader}>
+              <Ionicons name="swap-horizontal" size={24} color={colors.secondary} />
+              <Text style={styles.modalTitle}>Move to Store</Text>
+            </View>
+            {itemToMove && (
+              <Text style={styles.moveStoreItemName}>"{itemToMove.name}"</Text>
+            )}
+            <Text style={styles.moveStoreSubtitle}>Select a store for this item</Text>
+            
+            <ScrollView style={styles.storeList} showsVerticalScrollIndicator={false}>
+              {stores.map((store) => {
+                const isCurrentStore = itemToMove?.store === store || 
+                  (!itemToMove?.store && store === 'Any Store');
+                return (
+                  <TouchableOpacity
+                    key={store}
+                    style={[
+                      styles.storeOption,
+                      isCurrentStore && styles.storeOptionCurrent
+                    ]}
+                    onPress={() => handleMoveToStore(store)}
+                    disabled={isCurrentStore}
+                  >
+                    <View style={styles.storeOptionLeft}>
+                      <Ionicons 
+                        name="storefront" 
+                        size={20} 
+                        color={isCurrentStore ? colors.textMuted : colors.secondary} 
+                      />
+                      <Text style={[
+                        styles.storeOptionText,
+                        isCurrentStore && styles.storeOptionTextCurrent
+                      ]}>
+                        {store}
+                      </Text>
+                    </View>
+                    {isCurrentStore && (
+                      <View style={styles.currentStoreBadge}>
+                        <Text style={styles.currentStoreBadgeText}>Current</Text>
+                      </View>
+                    )}
+                    {!isCurrentStore && (
+                      <Ionicons name="arrow-forward" size={18} color={colors.textMuted} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.cancelMoveBtn}
+              onPress={() => {
+                setShowMoveToStoreModal(false);
+                setItemToMove(null);
+              }}
+            >
+              <Text style={styles.cancelMoveBtnText}>Cancel</Text>
+            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1320,5 +1426,95 @@ const styles = StyleSheet.create({
   checkedSectionLabel: {
     marginTop: spacing.lg,
     color: colors.textMuted,
+  },
+  // Move to Store Modal styles
+  moveStoreModal: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '70%',
+  },
+  moveStoreHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  moveStoreItemName: {
+    ...typography.body,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  moveStoreSubtitle: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  storeList: {
+    maxHeight: 280,
+  },
+  storeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  storeOptionCurrent: {
+    backgroundColor: colors.secondary + '10',
+    borderColor: colors.secondary + '30',
+  },
+  storeOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  storeOptionText: {
+    ...typography.body,
+    fontWeight: '500',
+  },
+  storeOptionTextCurrent: {
+    color: colors.textMuted,
+  },
+  currentStoreBadge: {
+    backgroundColor: colors.secondary + '20',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.full,
+  },
+  currentStoreBadgeText: {
+    ...typography.caption,
+    color: colors.secondary,
+    fontWeight: '600',
+    fontSize: 10,
+  },
+  cancelMoveBtn: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+  },
+  cancelMoveBtnText: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  // Edit modal style (for Add Store)
+  editModal: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 340,
   },
 });

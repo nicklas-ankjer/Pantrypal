@@ -23,6 +23,12 @@ interface LocationChoice {
   item_id: string;
 }
 
+interface MissingIngredient {
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
 export default function RecipeDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,9 +47,29 @@ export default function RecipeDetailScreen() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [selectedIngredient, setSelectedIngredient] = useState<IngredientAvailability | null>(null);
 
+  // Store selection for missing ingredients
+  const [showStoreSelectModal, setShowStoreSelectModal] = useState(false);
+  const [missingIngredients, setMissingIngredients] = useState<MissingIngredient[]>([]);
+  const [stores, setStores] = useState<string[]>(['Any Store']);
+  const [selectedStore, setSelectedStore] = useState('Any Store');
+
   useEffect(() => {
     loadRecipe();
+    fetchStores();
   }, [id]);
+
+  // Fetch stores from API
+  const fetchStores = async () => {
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/stores`);
+      const data = await response.json();
+      if (data.stores && data.stores.length > 0) {
+        setStores(data.stores);
+      }
+    } catch (error) {
+      console.error('Error fetching stores:', error);
+    }
+  };
 
   const loadRecipe = async () => {
     if (!id) return;
@@ -90,17 +116,34 @@ export default function RecipeDetailScreen() {
       return;
     }
 
+    // Prepare missing ingredients and show store selection modal
+    const ingredients = missing.map(m => ({
+      name: m.ingredient,
+      quantity: Math.max(0.1, m.required - m.available),
+      unit: m.unit,
+    }));
+    
+    setMissingIngredients(ingredients);
+    setSelectedStore('Any Store');
+    setShowStoreSelectModal(true);
+  };
+
+  // Actually add items to shopping list with selected store
+  const confirmAddMissingToList = async () => {
     setCooking(true);
+    setShowStoreSelectModal(false);
+    
     try {
-      const missingIngredients = missing.map(m => ({
-        name: m.ingredient,
-        quantity: Math.max(0.1, m.required - m.available),
-        unit: m.unit,
+      // Add store to each ingredient
+      const ingredientsWithStore = missingIngredients.map(ing => ({
+        ...ing,
+        store: selectedStore,
       }));
-      console.log('Adding missing ingredients:', missingIngredients);
-      await shoppingListApi.addMissing(missingIngredients);
+      console.log('Adding missing ingredients with store:', ingredientsWithStore);
+      await shoppingListApi.addMissing(ingredientsWithStore);
       await fetchShoppingList();
-      Alert.alert('Added!', `${missing.length} missing ingredient${missing.length !== 1 ? 's' : ''} added to shopping list`);
+      Alert.alert('Added!', `${missingIngredients.length} missing ingredient${missingIngredients.length !== 1 ? 's' : ''} added to "${selectedStore}"`);
+      setMissingIngredients([]);
     } catch (error) {
       console.error('Failed to add missing:', error);
       Alert.alert('Error', 'Failed to add ingredients to shopping list');
@@ -435,6 +478,102 @@ export default function RecipeDetailScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Store Selection Modal for Missing Ingredients */}
+      <Modal
+        visible={showStoreSelectModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStoreSelectModal(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setShowStoreSelectModal(false)}
+        >
+          <Pressable style={styles.storeSelectModal} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.storeSelectHeader}>
+              <Ionicons name="cart" size={24} color={colors.primary} />
+              <Text style={styles.modalTitle}>Add to Shopping List</Text>
+            </View>
+            
+            <Text style={styles.storeSelectSubtitle}>
+              {missingIngredients.length} ingredient{missingIngredients.length !== 1 ? 's' : ''} will be added
+            </Text>
+
+            {/* Preview of items being added */}
+            <View style={styles.ingredientPreview}>
+              {missingIngredients.slice(0, 3).map((ing, index) => (
+                <Text key={index} style={styles.ingredientPreviewText}>
+                  • {ing.name} ({ing.quantity} {ing.unit})
+                </Text>
+              ))}
+              {missingIngredients.length > 3 && (
+                <Text style={styles.ingredientPreviewMore}>
+                  +{missingIngredients.length - 3} more...
+                </Text>
+              )}
+            </View>
+
+            <Text style={styles.storeSelectLabel}>Select store:</Text>
+            
+            <ScrollView style={styles.storeSelectList} showsVerticalScrollIndicator={false}>
+              {stores.map((store) => (
+                <TouchableOpacity
+                  key={store}
+                  style={[
+                    styles.storeSelectOption,
+                    selectedStore === store && styles.storeSelectOptionActive
+                  ]}
+                  onPress={() => setSelectedStore(store)}
+                >
+                  <View style={styles.storeSelectOptionLeft}>
+                    <Ionicons 
+                      name={selectedStore === store ? 'radio-button-on' : 'radio-button-off'} 
+                      size={20} 
+                      color={selectedStore === store ? colors.primary : colors.textMuted} 
+                    />
+                    <View style={styles.storeSelectIcon}>
+                      <Ionicons 
+                        name="storefront" 
+                        size={18} 
+                        color={selectedStore === store ? colors.primary : colors.secondary} 
+                      />
+                    </View>
+                    <Text style={[
+                      styles.storeSelectOptionText,
+                      selectedStore === store && styles.storeSelectOptionTextActive
+                    ]}>
+                      {store}
+                    </Text>
+                  </View>
+                  {selectedStore === store && (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.storeSelectButtons}>
+              <TouchableOpacity
+                style={styles.storeSelectCancelBtn}
+                onPress={() => {
+                  setShowStoreSelectModal(false);
+                  setMissingIngredients([]);
+                }}
+              >
+                <Text style={styles.storeSelectCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.storeSelectConfirmBtn}
+                onPress={confirmAddMissingToList}
+              >
+                <Ionicons name="add" size={18} color={colors.white} />
+                <Text style={styles.storeSelectConfirmText}>Add to List</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -718,6 +857,114 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   modalDoneText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '600',
+  },
+  // Store Selection Modal styles
+  storeSelectModal: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 360,
+    maxHeight: '80%',
+  },
+  storeSelectHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  storeSelectSubtitle: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  ingredientPreview: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  ingredientPreviewText: {
+    ...typography.bodySmall,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  ingredientPreviewMore: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  storeSelectLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+  },
+  storeSelectList: {
+    maxHeight: 200,
+  },
+  storeSelectOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  storeSelectOptionActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '10',
+  },
+  storeSelectOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  storeSelectIcon: {
+    marginLeft: spacing.xs,
+  },
+  storeSelectOptionText: {
+    ...typography.body,
+    fontWeight: '500',
+  },
+  storeSelectOptionTextActive: {
+    color: colors.primary,
+  },
+  storeSelectButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  storeSelectCancelBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+  },
+  storeSelectCancelText: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  storeSelectConfirmBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+  },
+  storeSelectConfirmText: {
     ...typography.body,
     color: colors.white,
     fontWeight: '600',

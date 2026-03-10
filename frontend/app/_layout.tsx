@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '../src/components/theme';
+import { useAuthStore } from '../src/store/authStore';
 
 export default function RootLayout() {
+  const hydrate = useAuthStore(state => state.hydrate);
+
+  useEffect(() => {
+    // Hydrate auth state from storage on app start
+    hydrate();
+  }, []);
+
   return (
     <>
       <StatusBar style="dark" />

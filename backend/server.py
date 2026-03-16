@@ -165,6 +165,7 @@ def hash_pin(pin: str) -> str:
 class UserRegister(BaseModel):
     username: str
     pin: str  # 4-digit PIN
+    role: str = "adult"  # "adult" or "child"
 
 class UserLogin(BaseModel):
     username: str
@@ -173,6 +174,7 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
+    role: str = "adult"
     household_id: Optional[str] = None
     created_at: datetime
 
@@ -190,6 +192,24 @@ class PushTokenRegister(BaseModel):
 
 class NotificationSettings(BaseModel):
     emergency_alerts_enabled: bool = True
+
+# ==================== DINNER WISHES MODELS ====================
+
+class DinnerWishCreate(BaseModel):
+    recipe_id: str
+    recipe_name: str
+
+class DinnerWishResponse(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    recipe_id: str
+    recipe_name: str
+    status: str  # "pending" or "approved"
+    household_id: str
+    created_at: datetime
+
+MAX_PENDING_WISHES = 7  # Maximum pending wishes per child
 
 async def send_push_notification(push_token: str, title: str, body: str, data: dict = None):
     """Send a push notification via Expo's push service"""
@@ -381,6 +401,10 @@ async def register_user(user: UserRegister):
     if len(user.username) < 2:
         raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
     
+    # Validate role
+    if user.role not in ["adult", "child"]:
+        raise HTTPException(status_code=400, detail="Role must be 'adult' or 'child'")
+    
     # Check if username exists
     existing = await db.users.find_one({"username": user.username.lower()})
     if existing:
@@ -391,6 +415,7 @@ async def register_user(user: UserRegister):
         "username": user.username,
         "username_lower": user.username.lower(),
         "pin_hash": hash_pin(user.pin),
+        "role": user.role,
         "household_id": None,
         "created_at": now,
         "updated_at": now
@@ -402,6 +427,7 @@ async def register_user(user: UserRegister):
     return {
         "id": str(result.inserted_id),
         "username": user.username,
+        "role": user.role,
         "household_id": None,
         "created_at": now
     }
@@ -419,6 +445,7 @@ async def login_user(user: UserLogin):
     return {
         "id": str(db_user['_id']),
         "username": db_user['username'],
+        "role": db_user.get('role', 'adult'),  # Default to adult for existing users
         "household_id": db_user.get('household_id'),
         "created_at": db_user['created_at']
     }
@@ -1349,10 +1376,182 @@ async def delete_store(name: str, household_id: Optional[str] = None):
     
     return {"message": f"Deleted store '{name}' and moved items to 'Any Store'"}
 
+# ==================== DINNER WISHES ENDPOINTS ====================
+
+@api_router.post("/wishes")
+async def create_wish(wish: DinnerWishCreate, user_id: str):
+    """Create a dinner wish (for child users)"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get('role', 'adult') != 'child':
+        raise HTTPException(status_code=403, detail="Only child users can make wishes")
+    
+    if not user.get('household_id'):
+        raise HTTPException(status_code=400, detail="User must be part of a household")
+    
+    # Check pending wishes count
+    pending_count = await db.dinner_wishes.count_documents({
+        "user_id": user_id,
+        "status": "pending"
+    })
+    
+    if pending_count >= MAX_PENDING_WISHES:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Maximum {MAX_PENDING_WISHES} pending wishes allowed. Wait for an adult to approve some."
+        )
+    
+    # Check if this recipe is already wished
+    existing_wish = await db.dinner_wishes.find_one({
+        "user_id": user_id,
+        "recipe_id": wish.recipe_id,
+        "status": "pending"
+    })
+    
+    if existing_wish:
+        raise HTTPException(status_code=400, detail="You already wished for this recipe")
+    
+    now = datetime.utcnow()
+    wish_doc = {
+        "user_id": user_id,
+        "username": user['username'],
+        "recipe_id": wish.recipe_id,
+        "recipe_name": wish.recipe_name,
+        "status": "pending",
+        "household_id": user['household_id'],
+        "created_at": now
+    }
+    
+    result = await db.dinner_wishes.insert_one(wish_doc)
+    
+    # Send push notification to all adult household members
+    adult_members = await db.users.find({
+        "household_id": user['household_id'],
+        "role": "adult"
+    }).to_list(100)
+    
+    for adult in adult_members:
+        adult_id = str(adult['_id'])
+        # Get push tokens for this adult
+        tokens = await db.push_tokens.find({"user_id": adult_id}).to_list(10)
+        for token_doc in tokens:
+            await send_push_notification(
+                token_doc['push_token'],
+                "🍽️ Dinner Wish!",
+                f"{user['username']} wishes to have {wish.recipe_name} for dinner",
+                {"type": "dinner_wish", "wish_id": str(result.inserted_id)}
+            )
+    
+    return {
+        "id": str(result.inserted_id),
+        "message": f"Wish for {wish.recipe_name} created!",
+        "pending_count": pending_count + 1
+    }
+
+@api_router.get("/wishes")
+async def get_wishes(user_id: str, status: Optional[str] = None):
+    """Get dinner wishes for a household"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.get('household_id'):
+        return {"wishes": [], "pending_count": 0}
+    
+    query = {"household_id": user['household_id']}
+    if status:
+        query["status"] = status
+    
+    wishes = await db.dinner_wishes.find(query).sort("created_at", -1).to_list(100)
+    
+    # Count pending wishes for this user
+    user_pending = await db.dinner_wishes.count_documents({
+        "user_id": user_id,
+        "status": "pending"
+    })
+    
+    return {
+        "wishes": [
+            {
+                "id": str(w['_id']),
+                "user_id": w['user_id'],
+                "username": w['username'],
+                "recipe_id": w['recipe_id'],
+                "recipe_name": w['recipe_name'],
+                "status": w['status'],
+                "created_at": w['created_at']
+            }
+            for w in wishes
+        ],
+        "pending_count": user_pending,
+        "max_wishes": MAX_PENDING_WISHES
+    }
+
+@api_router.put("/wishes/{wish_id}/approve")
+async def approve_wish(wish_id: str, user_id: str):
+    """Approve a dinner wish (for adult users)"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get('role', 'adult') != 'adult':
+        raise HTTPException(status_code=403, detail="Only adult users can approve wishes")
+    
+    wish = await db.dinner_wishes.find_one({"_id": ObjectId(wish_id)})
+    if not wish:
+        raise HTTPException(status_code=404, detail="Wish not found")
+    
+    if wish['household_id'] != user.get('household_id'):
+        raise HTTPException(status_code=403, detail="Wish belongs to another household")
+    
+    await db.dinner_wishes.update_one(
+        {"_id": ObjectId(wish_id)},
+        {"$set": {"status": "approved", "approved_by": user_id, "approved_at": datetime.utcnow()}}
+    )
+    
+    # Notify the child that their wish was approved
+    child_tokens = await db.push_tokens.find({"user_id": wish['user_id']}).to_list(10)
+    for token_doc in child_tokens:
+        await send_push_notification(
+            token_doc['push_token'],
+            "🎉 Wish Approved!",
+            f"Your wish for {wish['recipe_name']} was approved!",
+            {"type": "wish_approved", "wish_id": wish_id}
+        )
+    
+    return {"message": "Wish approved"}
+
+@api_router.delete("/wishes/{wish_id}")
+async def delete_wish(wish_id: str, user_id: str):
+    """Delete a dinner wish"""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    wish = await db.dinner_wishes.find_one({"_id": ObjectId(wish_id)})
+    if not wish:
+        raise HTTPException(status_code=404, detail="Wish not found")
+    
+    # Check permissions: user must be the owner or an adult in the same household
+    is_owner = wish['user_id'] == user_id
+    is_household_adult = (
+        wish['household_id'] == user.get('household_id') and 
+        user.get('role', 'adult') == 'adult'
+    )
+    
+    if not is_owner and not is_household_adult:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this wish")
+    
+    await db.dinner_wishes.delete_one({"_id": ObjectId(wish_id)})
+    
+    return {"message": "Wish deleted"}
+
 # ==================== DASHBOARD ENDPOINT ====================
 
 @api_router.get("/dashboard")
-async def get_dashboard():
+async def get_dashboard(user_id: Optional[str] = None):
     now = datetime.utcnow()
     
     # Get low stock alerts
@@ -1392,11 +1591,33 @@ async def get_dashboard():
     # Get shopping list count
     shopping_count = await db.shopping_list.count_documents({"checked": False})
     
+    # Get dinner wishes for the household (only for adults)
+    dinner_wishes = []
+    if user_id:
+        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if user and user.get('household_id') and user.get('role', 'adult') == 'adult':
+            wishes = await db.dinner_wishes.find({
+                "household_id": user['household_id'],
+                "status": "pending"
+            }).sort("created_at", -1).to_list(20)
+            
+            dinner_wishes = [
+                {
+                    "id": str(w['_id']),
+                    "username": w['username'],
+                    "recipe_id": w['recipe_id'],
+                    "recipe_name": w['recipe_name'],
+                    "created_at": w['created_at'].isoformat()
+                }
+                for w in wishes
+            ]
+    
     return {
         "low_stock_alerts": low_stock,
         "expiring_items": expiring_items,
         "recipes_you_can_cook": what_can_cook['can_cook'][:5],
         "shopping_list_count": shopping_count,
+        "dinner_wishes": dinner_wishes,
         "timestamp": now.isoformat()
     }
 

@@ -18,22 +18,29 @@ import { colors, spacing, borderRadius, typography } from '../src/components/the
 import { useAuthStore } from '../src/store/authStore';
 
 type AuthMode = 'login' | 'register';
+type UserRole = 'adult' | 'child';
 
 export default function AuthScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { login, register, isAuthenticated, loading, error, clearError } = useAuthStore();
+  const { login, register, isAuthenticated, loading, error, clearError, user } = useAuthStore();
   
   const [mode, setMode] = useState<AuthMode>('login');
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+  const [selectedRole, setSelectedRole] = useState<UserRole>('adult');
 
   useEffect(() => {
-    if (isAuthenticated) {
-      router.replace('/(tabs)');
+    if (isAuthenticated && user) {
+      // Route based on role
+      if (user.role === 'child') {
+        router.replace('/child-home');
+      } else {
+        router.replace('/(tabs)');
+      }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     if (error) {
@@ -58,15 +65,17 @@ export default function AuthScreen() {
         Alert.alert('Error', 'PINs do not match');
         return;
       }
-      const success = await register(username.trim(), pin);
+      const success = await register(username.trim(), pin, selectedRole);
       if (success) {
-        router.replace('/(tabs)');
+        if (selectedRole === 'child') {
+          router.replace('/child-home');
+        } else {
+          router.replace('/(tabs)');
+        }
       }
     } else {
       const success = await login(username.trim(), pin);
-      if (success) {
-        router.replace('/(tabs)');
-      }
+      // Navigation happens in useEffect based on role
     }
   };
 
@@ -74,6 +83,7 @@ export default function AuthScreen() {
     setMode(mode === 'login' ? 'register' : 'login');
     setPin('');
     setConfirmPin('');
+    setSelectedRole('adult');
   };
 
   return (
@@ -99,6 +109,66 @@ export default function AuthScreen() {
 
         {/* Form */}
         <View style={styles.form}>
+          {/* Role Selection - Only for Register */}
+          {mode === 'register' && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>I am a...</Text>
+              <View style={styles.roleSelector}>
+                <TouchableOpacity
+                  style={[
+                    styles.roleOption,
+                    selectedRole === 'adult' && styles.roleOptionActive
+                  ]}
+                  onPress={() => setSelectedRole('adult')}
+                >
+                  <Ionicons 
+                    name="person" 
+                    size={28} 
+                    color={selectedRole === 'adult' ? colors.white : colors.primary} 
+                  />
+                  <Text style={[
+                    styles.roleOptionText,
+                    selectedRole === 'adult' && styles.roleOptionTextActive
+                  ]}>
+                    Adult
+                  </Text>
+                  <Text style={[
+                    styles.roleOptionDesc,
+                    selectedRole === 'adult' && styles.roleOptionDescActive
+                  ]}>
+                    Full access
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.roleOption,
+                    selectedRole === 'child' && styles.roleOptionActiveChild
+                  ]}
+                  onPress={() => setSelectedRole('child')}
+                >
+                  <Ionicons 
+                    name="happy" 
+                    size={28} 
+                    color={selectedRole === 'child' ? colors.white : colors.secondary} 
+                  />
+                  <Text style={[
+                    styles.roleOptionText,
+                    selectedRole === 'child' && styles.roleOptionTextActive
+                  ]}>
+                    Family Member
+                  </Text>
+                  <Text style={[
+                    styles.roleOptionDesc,
+                    selectedRole === 'child' && styles.roleOptionDescActive
+                  ]}>
+                    Simple view
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Username</Text>
             <View style={styles.inputWrapper}>
@@ -172,7 +242,11 @@ export default function AuthScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
+            style={[
+              styles.submitBtn, 
+              loading && styles.submitBtnDisabled,
+              mode === 'register' && selectedRole === 'child' && styles.submitBtnChild
+            ]}
             onPress={handleSubmit}
             disabled={loading}
           >
@@ -287,6 +361,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success,
     borderColor: colors.success,
   },
+  // Role selector styles
+  roleSelector: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  roleOption: {
+    flex: 1,
+    alignItems: 'center',
+    padding: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  roleOptionActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  roleOptionActiveChild: {
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary,
+  },
+  roleOptionText: {
+    ...typography.body,
+    fontWeight: '600',
+    marginTop: spacing.xs,
+    color: colors.text,
+  },
+  roleOptionTextActive: {
+    color: colors.white,
+  },
+  roleOptionDesc: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  roleOptionDescActive: {
+    color: colors.white,
+    opacity: 0.8,
+  },
   submitBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -295,6 +409,9 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     paddingVertical: spacing.md,
     marginTop: spacing.md,
+  },
+  submitBtnChild: {
+    backgroundColor: colors.secondary,
   },
   submitBtnDisabled: {
     opacity: 0.7,

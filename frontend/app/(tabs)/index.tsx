@@ -14,13 +14,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, shadows, typography } from '../../src/components/theme';
 import { useAppStore } from '../../src/store/appStore';
+import { useAuthStore } from '../../src/store/authStore';
 import { shoppingListApi } from '../../src/api/client';
 import { format, differenceInDays } from 'date-fns';
+import axios from 'axios';
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+interface DinnerWish {
+  id: string;
+  username: string;
+  recipe_id: string;
+  recipe_name: string;
+  created_at: string;
+}
 
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
+  const [dinnerWishes, setDinnerWishes] = useState<DinnerWish[]>([]);
+  const { user, isAuthenticated, isChild } = useAuthStore();
   
   const {
     dashboard,
@@ -35,8 +49,13 @@ export default function HomeScreen() {
   } = useAppStore();
 
   useEffect(() => {
+    // If child user, redirect to child home
+    if (isAuthenticated && user?.role === 'child') {
+      router.replace('/child-home');
+      return;
+    }
     loadAllData();
-  }, []);
+  }, [isAuthenticated, user]);
 
   const loadAllData = async () => {
     await Promise.all([
@@ -45,7 +64,37 @@ export default function HomeScreen() {
       fetchShoppingList(),
       fetchRecipes(),
       fetchEmergencyStock(),
+      fetchDinnerWishes(),
     ]);
+  };
+
+  const fetchDinnerWishes = async () => {
+    if (!user) return;
+    try {
+      const response = await axios.get(`${API_BASE}/api/wishes?user_id=${user.id}&status=pending`);
+      setDinnerWishes(response.data.wishes || []);
+    } catch (error) {
+      console.error('Failed to fetch dinner wishes:', error);
+    }
+  };
+
+  const handleApproveWish = async (wishId: string, recipeName: string) => {
+    try {
+      await axios.put(`${API_BASE}/api/wishes/${wishId}/approve?user_id=${user?.id}`);
+      Alert.alert('Approved!', `${recipeName} wish has been approved`);
+      await fetchDinnerWishes();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to approve wish');
+    }
+  };
+
+  const handleDismissWish = async (wishId: string) => {
+    try {
+      await axios.delete(`${API_BASE}/api/wishes/${wishId}?user_id=${user?.id}`);
+      await fetchDinnerWishes();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to dismiss wish');
+    }
   };
 
   const onRefresh = async () => {
@@ -193,6 +242,38 @@ export default function HomeScreen() {
               <Text style={styles.viewAllText}>View all suggestions</Text>
               <Ionicons name="arrow-forward" size={16} color={colors.primary} />
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Dinner Wishes from Family */}
+        {dinnerWishes.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="heart" size={20} color={colors.danger} />
+              <Text style={styles.sectionTitle}>Dinner Wishes</Text>
+            </View>
+            {dinnerWishes.map((wish) => (
+              <View key={wish.id} style={styles.wishCard}>
+                <View style={styles.wishContent}>
+                  <Text style={styles.wishRecipeName}>{wish.recipe_name}</Text>
+                  <Text style={styles.wishFrom}>from {wish.username}</Text>
+                </View>
+                <View style={styles.wishActions}>
+                  <TouchableOpacity
+                    style={styles.approveBtn}
+                    onPress={() => handleApproveWish(wish.id, wish.recipe_name)}
+                  >
+                    <Ionicons name="checkmark" size={20} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dismissBtn}
+                    onPress={() => handleDismissWish(wish.id)}
+                  >
+                    <Ionicons name="close" size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -404,5 +485,50 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textMuted,
     marginTop: spacing.sm,
+  },
+  // Dinner Wishes styles
+  wishCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.danger + '10',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.danger,
+  },
+  wishContent: {
+    flex: 1,
+  },
+  wishRecipeName: {
+    ...typography.body,
+    fontWeight: '600',
+  },
+  wishFrom: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  wishActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  approveBtn: {
+    backgroundColor: colors.success,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dismissBtn: {
+    backgroundColor: colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
 });

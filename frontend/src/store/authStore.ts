@@ -8,6 +8,7 @@ const AUTH_STORAGE_KEY = '@kitchen_counter_auth';
 export interface User {
   id: string;
   username: string;
+  role: 'adult' | 'child';
   household_id: string | null;
   created_at: string;
 }
@@ -36,7 +37,7 @@ interface AuthState {
   hydrated: boolean;
 
   // Auth actions
-  register: (username: string, pin: string) => Promise<boolean>;
+  register: (username: string, pin: string, role: 'adult' | 'child') => Promise<boolean>;
   login: (username: string, pin: string) => Promise<boolean>;
   logout: () => Promise<void>;
   
@@ -49,6 +50,7 @@ interface AuthState {
   // Utility
   clearError: () => void;
   getHouseholdId: () => string | null;
+  isChild: () => boolean;
   
   // Persistence
   hydrate: () => Promise<void>;
@@ -120,12 +122,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     await saveToStorage(user, household);
   },
 
-  register: async (username: string, pin: string) => {
+  register: async (username: string, pin: string, role: 'adult' | 'child' = 'adult') => {
     try {
       set({ loading: true, error: null });
       const response = await axios.post(`${API_BASE}/api/auth/register`, {
         username,
         pin,
+        role,
       });
       
       const user = response.data;
@@ -312,5 +315,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   getHouseholdId: () => {
     const { user } = get();
     return user?.household_id || null;
+  },
+  
+  isChild: () => {
+    const { user } = get();
+    return user?.role === 'child';
   },
 }));

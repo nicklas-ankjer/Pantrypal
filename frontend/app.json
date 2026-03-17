@@ -58,7 +58,8 @@
           "photosPermission": "Select photos of your dishes",
           "cameraPermission": "Take photos of your cooked dishes"
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

@@ -327,46 +327,60 @@ export default function ChildHomeScreen() {
             <FlatList
               data={allRecipes}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.recipeList}
+              contentContainerStyle={styles.wishGridList}
+              numColumns={2}
+              columnWrapperStyle={styles.wishGridRow}
               renderItem={({ item }) => {
                 const isWished = myWishes.some(w => w.recipe_id === item.id);
                 
                 return (
                   <TouchableOpacity 
-                    style={[styles.wishRecipeCard, isWished && styles.wishedCard]}
+                    style={[styles.wishGridCard, isWished && styles.wishGridCardWished]}
                     onPress={() => !isWished && handleAddWish(item)}
                     disabled={addingWish || isWished}
+                    activeOpacity={0.8}
                   >
-                    {/* Recipe Image or Icon */}
-                    {item.image ? (
-                      <Image 
-                        source={{ uri: item.image }} 
-                        style={styles.wishRecipeImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.wishRecipeIconPlaceholder}>
-                        <Ionicons name="restaurant" size={24} color={colors.textMuted} />
-                      </View>
-                    )}
+                    {/* Large Recipe Image */}
+                    <View style={styles.wishImageContainer}>
+                      {item.image ? (
+                        <Image 
+                          source={{ uri: item.image }} 
+                          style={styles.wishGridImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.wishGridPlaceholder}>
+                          <Ionicons name="restaurant" size={48} color={colors.textMuted} />
+                          <Text style={styles.noPhotoText}>No photo yet</Text>
+                        </View>
+                      )}
+                      
+                      {/* Wish/Wished overlay badge */}
+                      {isWished ? (
+                        <View style={styles.wishedOverlay}>
+                          <Ionicons name="heart" size={32} color={colors.white} />
+                          <Text style={styles.wishedOverlayText}>Wished!</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.wishHeartBadge}>
+                          <Ionicons name="heart-outline" size={24} color={colors.danger} />
+                        </View>
+                      )}
+                    </View>
                     
-                    <View style={styles.recipeInfo}>
-                      <Text style={styles.recipeName}>{item.name}</Text>
-                      <Text style={styles.recipeIngredients}>
+                    {/* Text below image */}
+                    <View style={styles.wishGridTextContainer}>
+                      <Text style={styles.wishGridName} numberOfLines={2}>{item.name}</Text>
+                      <Text style={styles.wishGridIngredients}>
                         {item.ingredients.length} ingredients
                       </Text>
+                      
+                      {!isWished && (
+                        <View style={styles.tapToWishHint}>
+                          <Text style={styles.tapToWishText}>Tap to wish</Text>
+                        </View>
+                      )}
                     </View>
-                    {isWished ? (
-                      <View style={styles.wishedBadge}>
-                        <Ionicons name="heart" size={16} color={colors.white} />
-                        <Text style={styles.wishedText}>Wished</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.addWishBtn}>
-                        <Ionicons name="heart-outline" size={20} color={colors.danger} />
-                        <Text style={styles.addWishText}>Wish</Text>
-                      </View>
-                    )}
                   </TouchableOpacity>
                 );
               }}
@@ -559,6 +573,7 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontWeight: '600',
   },
+  // Old styles kept for backward compatibility
   wishRecipeCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -631,5 +646,100 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  // NEW: Grid layout for wishlist
+  wishGridList: {
+    padding: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  wishGridRow: {
+    justifyContent: 'space-between',
+  },
+  wishGridCard: {
+    width: '48%',
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+    ...shadows.md,
+  },
+  wishGridCardWished: {
+    opacity: 0.7,
+  },
+  wishImageContainer: {
+    width: '100%',
+    height: 140,
+    position: 'relative',
+  },
+  wishGridImage: {
+    width: '100%',
+    height: '100%',
+  },
+  wishGridPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noPhotoText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  wishHeartBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...shadows.sm,
+  },
+  wishedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(239, 68, 68, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  wishedOverlayText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
+  wishGridTextContainer: {
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  wishGridName: {
+    ...typography.body,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  wishGridIngredients: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  tapToWishHint: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.danger + '15',
+    borderRadius: borderRadius.full,
+  },
+  tapToWishText: {
+    ...typography.caption,
+    color: colors.danger,
+    fontWeight: '600',
   },
 });

@@ -10,6 +10,7 @@ import {
   Modal,
   Pressable,
   FlatList,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ interface Recipe {
   id: string;
   name: string;
   ingredients: { name: string; quantity: number; unit: string }[];
+  image?: string;
 }
 
 interface CookableRecipe {
@@ -335,6 +337,19 @@ export default function ChildHomeScreen() {
                     onPress={() => !isWished && handleAddWish(item)}
                     disabled={addingWish || isWished}
                   >
+                    {/* Recipe Image or Icon */}
+                    {item.image ? (
+                      <Image 
+                        source={{ uri: item.image }} 
+                        style={styles.wishRecipeImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.wishRecipeIconPlaceholder}>
+                        <Ionicons name="restaurant" size={24} color={colors.textMuted} />
+                      </View>
+                    )}
+                    
                     <View style={styles.recipeInfo}>
                       <Text style={styles.recipeName}>{item.name}</Text>
                       <Text style={styles.recipeIngredients}>
@@ -552,6 +567,21 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
     ...shadows.sm,
+  },
+  wishRecipeImage: {
+    width: 60,
+    height: 60,
+    borderRadius: borderRadius.md,
+    marginRight: spacing.md,
+  },
+  wishRecipeIconPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
   },
   wishedCard: {
     backgroundColor: colors.danger + '10',

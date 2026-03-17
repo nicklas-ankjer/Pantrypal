@@ -8,6 +8,7 @@ export interface Recipe {
   id: string;
   name: string;
   ingredients: Ingredient[];
+  image?: string;  // Base64 encoded image
   created_at: string;
   updated_at: string;
 }

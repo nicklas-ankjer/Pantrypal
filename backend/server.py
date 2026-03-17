@@ -57,13 +57,18 @@ class RecipeCreate(BaseModel):
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
     ingredients: Optional[List[IngredientBase]] = None
+    image: Optional[str] = None  # Base64 encoded image
 
 class RecipeResponse(BaseModel):
     id: str
     name: str
     ingredients: List[IngredientBase]
+    image: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+class RecipeImageUpdate(BaseModel):
+    image: str  # Base64 encoded image
 
 class HomeStockItemCreate(BaseModel):
     name: str
@@ -921,6 +926,34 @@ async def delete_recipe(recipe_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return {"message": "Recipe deleted successfully"}
+
+@api_router.put("/recipes/{recipe_id}/image")
+async def update_recipe_image(recipe_id: str, data: RecipeImageUpdate):
+    """Upload or update a recipe's image (base64 encoded)"""
+    recipe = await db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    await db.recipes.update_one(
+        {"_id": ObjectId(recipe_id)},
+        {"$set": {"image": data.image, "updated_at": datetime.utcnow()}}
+    )
+    
+    return {"message": "Recipe image updated successfully"}
+
+@api_router.delete("/recipes/{recipe_id}/image")
+async def delete_recipe_image(recipe_id: str):
+    """Remove a recipe's image"""
+    recipe = await db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    await db.recipes.update_one(
+        {"_id": ObjectId(recipe_id)},
+        {"$set": {"image": None, "updated_at": datetime.utcnow()}}
+    )
+    
+    return {"message": "Recipe image removed successfully"}
 
 @api_router.get("/recipes/{recipe_id}/availability")
 async def check_recipe_availability(recipe_id: str):

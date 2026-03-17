@@ -29,7 +29,17 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Kitchen Counter",
+      "shortName": "Kitchen",
+      "description": "Manage your kitchen inventory, recipes, and shopping lists",
+      "lang": "en",
+      "themeColor": "#4A7C59",
+      "backgroundColor": "#F8F9FA",
+      "display": "standalone",
+      "orientation": "portrait",
+      "scope": "/",
+      "startUrl": "/"
     },
     "plugins": [
       "expo-router",

@@ -397,28 +397,59 @@ class HouseholdMember(BaseModel):
 
 # ==================== AUTH ENDPOINTS ====================
 
+@api_router.get("/auth/check-username/{username}")
+async def check_username_availability(username: str):
+    """Check if a username is available"""
+    clean_username = username.strip().lower()
+    
+    if len(clean_username) < 2:
+        return {"available": False, "message": "Username must be at least 2 characters"}
+    
+    if len(clean_username) > 20:
+        return {"available": False, "message": "Username must be less than 20 characters"}
+    
+    if not all(c.isalnum() or c.isspace() for c in clean_username):
+        return {"available": False, "message": "Username can only contain letters, numbers, and spaces"}
+    
+    existing = await db.users.find_one({"username_lower": clean_username})
+    
+    if existing:
+        return {"available": False, "message": "This username is already taken"}
+    
+    return {"available": True, "message": "Username is available"}
+
 @api_router.post("/auth/register")
 async def register_user(user: UserRegister):
     """Register a new user with username and 4-digit PIN"""
+    # Validate PIN
     if len(user.pin) != 4 or not user.pin.isdigit():
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
     
-    if len(user.username) < 2:
+    # Validate username length
+    if len(user.username.strip()) < 2:
         raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
+    
+    if len(user.username.strip()) > 20:
+        raise HTTPException(status_code=400, detail="Username must be less than 20 characters")
+    
+    # Validate username format (letters, numbers, spaces only)
+    clean_username = user.username.strip()
+    if not all(c.isalnum() or c.isspace() for c in clean_username):
+        raise HTTPException(status_code=400, detail="Username can only contain letters, numbers, and spaces")
     
     # Validate role
     if user.role not in ["adult", "child"]:
         raise HTTPException(status_code=400, detail="Role must be 'adult' or 'child'")
     
-    # Check if username exists
-    existing = await db.users.find_one({"username": user.username.lower()})
+    # Check if username exists (case-insensitive)
+    existing = await db.users.find_one({"username_lower": clean_username.lower()})
     if existing:
-        raise HTTPException(status_code=400, detail="Username already taken")
+        raise HTTPException(status_code=400, detail="This username is already taken. Please choose a different one.")
     
     now = datetime.utcnow()
     user_doc = {
-        "username": user.username,
-        "username_lower": user.username.lower(),
+        "username": clean_username,
+        "username_lower": clean_username.lower(),
         "pin_hash": hash_pin(user.pin),
         "role": user.role,
         "household_id": None,
@@ -1744,6 +1775,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_db_client():
+    """Create database indexes on startup"""
+    try:
+        # Create unique index on username_lower to ensure uniqueness
+        await db.users.create_index("username_lower", unique=True)
+        print("Database indexes created successfully")
+    except Exception as e:
+        print(f"Index creation note: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

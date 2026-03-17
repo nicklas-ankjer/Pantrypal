@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, typography } from '../src/components/theme';
 import { useAuthStore } from '../src/store/authStore';
+import axios from 'axios';
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 type AuthMode = 'login' | 'register';
 type UserRole = 'adult' | 'child';
@@ -30,6 +33,11 @@ export default function AuthScreen() {
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [selectedRole, setSelectedRole] = useState<UserRole>('adult');
+  
+  // Username availability check
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameMessage, setUsernameMessage] = useState('');
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -49,6 +57,30 @@ export default function AuthScreen() {
     }
   }, [error]);
 
+  // Debounced username check
+  useEffect(() => {
+    if (mode !== 'register' || username.trim().length < 2) {
+      setUsernameAvailable(null);
+      setUsernameMessage('');
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setCheckingUsername(true);
+      try {
+        const response = await axios.get(`${API_BASE}/api/auth/check-username/${encodeURIComponent(username.trim())}`);
+        setUsernameAvailable(response.data.available);
+        setUsernameMessage(response.data.message);
+      } catch (error) {
+        console.error('Username check failed:', error);
+      } finally {
+        setCheckingUsername(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [username, mode]);
+
   const handleSubmit = async () => {
     if (!username.trim()) {
       Alert.alert('Error', 'Please enter a username');
@@ -61,6 +93,12 @@ export default function AuthScreen() {
     }
 
     if (mode === 'register') {
+      // Check username availability before registering
+      if (!usernameAvailable) {
+        Alert.alert('Username Unavailable', 'Please choose a different username');
+        return;
+      }
+      
       if (pin !== confirmPin) {
         Alert.alert('Error', 'PINs do not match');
         return;
@@ -84,6 +122,8 @@ export default function AuthScreen() {
     setPin('');
     setConfirmPin('');
     setSelectedRole('adult');
+    setUsernameAvailable(null);
+    setUsernameMessage('');
   };
 
   return (
@@ -171,18 +211,42 @@ export default function AuthScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Username</Text>
-            <View style={styles.inputWrapper}>
+            <View style={[
+              styles.inputWrapper,
+              mode === 'register' && usernameAvailable === true && styles.inputValid,
+              mode === 'register' && usernameAvailable === false && styles.inputInvalid,
+            ]}>
               <Ionicons name="person-outline" size={20} color={colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Enter your name"
+                placeholder="Choose a unique username"
                 placeholderTextColor={colors.textMuted}
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="words"
                 autoCorrect={false}
+                maxLength={20}
               />
+              {mode === 'register' && username.length >= 2 && (
+                <View style={styles.usernameStatus}>
+                  {checkingUsername ? (
+                    <ActivityIndicator size="small" color={colors.textMuted} />
+                  ) : usernameAvailable === true ? (
+                    <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                  ) : usernameAvailable === false ? (
+                    <Ionicons name="close-circle" size={22} color={colors.danger} />
+                  ) : null}
+                </View>
+              )}
             </View>
+            {mode === 'register' && usernameMessage && !checkingUsername && (
+              <Text style={[
+                styles.usernameHint,
+                usernameAvailable ? styles.usernameHintSuccess : styles.usernameHintError
+              ]}>
+                {usernameMessage}
+              </Text>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -437,5 +501,28 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.primary,
     fontWeight: '600',
+  },
+  // Username validation styles
+  inputValid: {
+    borderColor: colors.success,
+    borderWidth: 2,
+  },
+  inputInvalid: {
+    borderColor: colors.danger,
+    borderWidth: 2,
+  },
+  usernameStatus: {
+    paddingRight: spacing.md,
+  },
+  usernameHint: {
+    ...typography.caption,
+    marginTop: spacing.xs,
+    marginLeft: spacing.sm,
+  },
+  usernameHintSuccess: {
+    color: colors.success,
+  },
+  usernameHintError: {
+    color: colors.danger,
   },
 });

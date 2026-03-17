@@ -1491,7 +1491,7 @@ async def get_wishes(user_id: str, status: Optional[str] = None):
 
 @api_router.put("/wishes/{wish_id}/approve")
 async def approve_wish(wish_id: str, user_id: str):
-    """Approve a dinner wish (for adult users)"""
+    """Approve a dinner wish (for adult users) - also adds missing ingredients to shopping list"""
     user = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1506,6 +1506,64 @@ async def approve_wish(wish_id: str, user_id: str):
     if wish['household_id'] != user.get('household_id'):
         raise HTTPException(status_code=403, detail="Wish belongs to another household")
     
+    # Get the recipe to check ingredients
+    recipe = await db.recipes.find_one({"_id": ObjectId(wish['recipe_id'])})
+    missing_ingredients = []
+    
+    if recipe and recipe.get('ingredients'):
+        # Get all home stock items
+        home_stock = await db.home_stock.find().to_list(1000)
+        stock_map = {}
+        for item in home_stock:
+            name_lower = item['name'].lower()
+            if name_lower not in stock_map:
+                stock_map[name_lower] = 0
+            stock_map[name_lower] += item['quantity']
+        
+        # Check each ingredient
+        for ing in recipe['ingredients']:
+            ing_name_lower = ing['name'].lower()
+            available = stock_map.get(ing_name_lower, 0)
+            required = ing['quantity']
+            
+            if available < required:
+                # Need to add to shopping list
+                shortage = required - available
+                missing_ingredients.append({
+                    "name": ing['name'],
+                    "quantity": shortage,
+                    "unit": ing['unit']
+                })
+        
+        # Add missing ingredients to shopping list
+        added_to_list = []
+        for missing in missing_ingredients:
+            # Check if already in shopping list
+            existing = await db.shopping_list.find_one({
+                "name": {"$regex": f"^{missing['name']}$", "$options": "i"}
+            })
+            
+            if existing:
+                # Update quantity
+                await db.shopping_list.update_one(
+                    {"_id": existing['_id']},
+                    {"$inc": {"quantity": missing['quantity']}, "$set": {"updated_at": datetime.utcnow()}}
+                )
+            else:
+                # Create new item
+                new_item = {
+                    "name": missing['name'],
+                    "quantity": missing['quantity'],
+                    "unit": missing['unit'],
+                    "store": "Any Store",
+                    "checked": False,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                await db.shopping_list.insert_one(new_item)
+            added_to_list.append(missing['name'])
+    
+    # Update wish status
     await db.dinner_wishes.update_one(
         {"_id": ObjectId(wish_id)},
         {"$set": {"status": "approved", "approved_by": user_id, "approved_at": datetime.utcnow()}}
@@ -1521,7 +1579,12 @@ async def approve_wish(wish_id: str, user_id: str):
             {"type": "wish_approved", "wish_id": wish_id}
         )
     
-    return {"message": "Wish approved"}
+    return {
+        "message": "Wish approved",
+        "recipe_name": wish['recipe_name'],
+        "missing_added": len(added_to_list),
+        "added_items": added_to_list
+    }
 
 @api_router.delete("/wishes/{wish_id}")
 async def delete_wish(wish_id: str, user_id: str):

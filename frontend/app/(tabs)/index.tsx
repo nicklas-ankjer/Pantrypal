@@ -80,8 +80,21 @@ export default function HomeScreen() {
 
   const handleApproveWish = async (wishId: string, recipeName: string) => {
     try {
-      await axios.put(`${API_BASE}/api/wishes/${wishId}/approve?user_id=${user?.id}`);
-      Alert.alert('Approved!', `${recipeName} wish has been approved`);
+      const response = await axios.put(`${API_BASE}/api/wishes/${wishId}/approve?user_id=${user?.id}`);
+      const data = response.data;
+      
+      // Show feedback based on what was added
+      if (data.missing_added > 0) {
+        Alert.alert(
+          '✓ Wish Approved!', 
+          `${recipeName} approved!\n\n${data.missing_added} missing ingredient${data.missing_added !== 1 ? 's' : ''} added to shopping list:\n• ${data.added_items.join('\n• ')}`
+        );
+        // Refresh shopping list
+        await fetchShoppingList();
+      } else {
+        Alert.alert('✓ Wish Approved!', `${recipeName} approved!\n\nAll ingredients are in stock.`);
+      }
+      
       await fetchDinnerWishes();
     } catch (error) {
       Alert.alert('Error', 'Failed to approve wish');

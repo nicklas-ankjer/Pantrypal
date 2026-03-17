@@ -54,6 +54,11 @@ export default function ShoppingListScreen() {
   const [showMoveToStoreModal, setShowMoveToStoreModal] = useState(false);
   const [itemToMove, setItemToMove] = useState<ShoppingListItem | null>(null);
   
+  // Purchase confirmation modal (when checking an item)
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [itemToPurchase, setItemToPurchase] = useState<ShoppingListItem | null>(null);
+  const [purchaseQuantity, setPurchaseQuantity] = useState('');
+  
   const {
     shoppingList,
     homeStock,
@@ -208,10 +213,46 @@ export default function ShoppingListScreen() {
   };
 
   const handleToggleCheck = async (item: ShoppingListItem) => {
+    // If unchecking, just toggle directly
+    if (item.checked) {
+      try {
+        await updateShoppingListItem(item.id, { checked: false });
+      } catch (error) {
+        console.error('Toggle check error:', error);
+      }
+      return;
+    }
+    
+    // If checking (marking as purchased), show confirmation modal
+    setItemToPurchase(item);
+    setPurchaseQuantity(item.quantity.toString());
+    setShowPurchaseModal(true);
+  };
+
+  // Confirm purchase with possibly adjusted quantity
+  const handleConfirmPurchase = async (useOriginalQuantity: boolean = true) => {
+    if (!itemToPurchase) return;
+    
+    const finalQuantity = useOriginalQuantity 
+      ? itemToPurchase.quantity 
+      : parseFloat(purchaseQuantity);
+    
+    if (isNaN(finalQuantity) || finalQuantity <= 0) {
+      Alert.alert('Invalid', 'Please enter a valid quantity');
+      return;
+    }
+    
     try {
-      await updateShoppingListItem(item.id, { checked: !item.checked });
+      // Update with new quantity if changed, and mark as checked
+      await updateShoppingListItem(itemToPurchase.id, { 
+        quantity: finalQuantity,
+        checked: true 
+      });
+      setShowPurchaseModal(false);
+      setItemToPurchase(null);
     } catch (error) {
-      console.error('Toggle check error:', error);
+      console.error('Confirm purchase error:', error);
+      Alert.alert('Error', 'Failed to update item');
     }
   };
 
@@ -850,6 +891,98 @@ export default function ShoppingListScreen() {
             >
               <Text style={styles.cancelMoveBtnText}>Cancel</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Purchase Confirmation Modal */}
+      <Modal
+        visible={showPurchaseModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowPurchaseModal(false);
+          setItemToPurchase(null);
+        }}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => {
+            setShowPurchaseModal(false);
+            setItemToPurchase(null);
+          }}
+        >
+          <Pressable style={styles.purchaseModal} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.purchaseHeader}>
+              <Ionicons name="cart-outline" size={28} color={colors.success} />
+              <Text style={styles.purchaseTitle}>Item Purchased?</Text>
+            </View>
+            
+            {itemToPurchase && (
+              <>
+                <Text style={styles.purchaseItemName}>{itemToPurchase.name}</Text>
+                
+                <View style={styles.purchaseQuantitySection}>
+                  <Text style={styles.purchaseLabel}>Planned quantity:</Text>
+                  <Text style={styles.purchasePlannedQty}>
+                    {itemToPurchase.quantity} {itemToPurchase.unit}
+                  </Text>
+                </View>
+                
+                <View style={styles.purchaseDivider} />
+                
+                <Text style={styles.purchaseQuestion}>
+                  Did you buy a different amount?
+                </Text>
+                
+                <View style={styles.purchaseInputRow}>
+                  <TextInput
+                    style={styles.purchaseInput}
+                    value={purchaseQuantity}
+                    onChangeText={setPurchaseQuantity}
+                    keyboardType="decimal-pad"
+                    placeholder="Qty"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <Text style={styles.purchaseUnit}>{itemToPurchase.unit}</Text>
+                </View>
+                
+                <View style={styles.purchaseButtons}>
+                  <TouchableOpacity
+                    style={styles.purchaseKeepBtn}
+                    onPress={() => handleConfirmPurchase(true)}
+                  >
+                    <Text style={styles.purchaseKeepText}>
+                      Keep {itemToPurchase.quantity} {itemToPurchase.unit}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[
+                      styles.purchaseUpdateBtn,
+                      purchaseQuantity === itemToPurchase.quantity.toString() && styles.purchaseUpdateBtnDisabled
+                    ]}
+                    onPress={() => handleConfirmPurchase(false)}
+                    disabled={purchaseQuantity === itemToPurchase.quantity.toString()}
+                  >
+                    <Ionicons name="checkmark" size={18} color={colors.white} />
+                    <Text style={styles.purchaseUpdateText}>
+                      Update to {purchaseQuantity || '0'} {itemToPurchase.unit}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                
+                <TouchableOpacity
+                  style={styles.purchaseCancelBtn}
+                  onPress={() => {
+                    setShowPurchaseModal(false);
+                    setItemToPurchase(null);
+                  }}
+                >
+                  <Text style={styles.purchaseCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1516,5 +1649,122 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     width: '100%',
     maxWidth: 340,
+  },
+  // Purchase confirmation modal styles
+  purchaseModal: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 340,
+  },
+  purchaseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  purchaseTitle: {
+    ...typography.h2,
+    color: colors.success,
+  },
+  purchaseItemName: {
+    ...typography.h3,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  purchaseQuantitySection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  purchaseLabel: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  purchasePlannedQty: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  purchaseDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
+  purchaseQuestion: {
+    ...typography.body,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+    color: colors.textSecondary,
+  },
+  purchaseInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  purchaseInput: {
+    ...typography.h2,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    textAlign: 'center',
+    minWidth: 100,
+    color: colors.textPrimary,
+  },
+  purchaseUnit: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  purchaseButtons: {
+    gap: spacing.sm,
+  },
+  purchaseKeepBtn: {
+    paddingVertical: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  purchaseKeepText: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  purchaseUpdateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.success,
+    borderRadius: borderRadius.md,
+  },
+  purchaseUpdateBtnDisabled: {
+    opacity: 0.5,
+  },
+  purchaseUpdateText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '600',
+  },
+  purchaseCancelBtn: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  purchaseCancelText: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
   },
 });
